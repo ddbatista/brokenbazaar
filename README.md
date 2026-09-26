@@ -80,7 +80,7 @@ make harden      # hardened    — the same attacks exit non-zero
 | `threat-models/` | v0 baseline + one diff per module, committed *before* the feature |
 | `coverage/` | Framework map + **declared non-coverage** |
 | `writeups/` | Blog-grade, one per finding |
-| `infra/` | Terraform (M5) |
+| `infra/` | Reserved — deployment topology is out of scope for now |
 | `spvs/` | Pipeline self-assessment (M6) |
 
 ## Frameworks
