@@ -1,0 +1,83 @@
+# HARDENED ZONE — see CLAUDE.md. The coding agent may read this, not write it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Repo rot is the failure mode for a tutorial repo: run the whole thing weekly.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          # No third-party deps yet, so there is no go.sum to key a cache on.
+          # Re-enable caching when the first dependency is added (by a human —
+          # go.mod is a hardened zone).
+          cache: false
+
+      - name: go vet
+        working-directory: app
+        run: go vet ./...
+
+      - name: go build
+        working-directory: app
+        run: go build ./...
+
+      - name: gofmt check
+        working-directory: app
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+  stack:
+    name: stack starts from clean clone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: make up
+        run: make up
+
+      - name: healthz answers
+        run: |
+          curl -fsS http://localhost:8080/healthz | tee /tmp/healthz.json
+          grep -q '"status":"ok"' /tmp/healthz.json
+
+      - name: hardened mode also starts
+        run: |
+          make harden
+          curl -fsS http://localhost:8080/healthz | grep -q '"hardened":true'
+
+      - name: logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: make down
+        if: always()
+        run: make down
+
+  attacks:
+    name: attack suite (both modes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: placeholder
+        run: |
+          echo "Attack suite arrives with M1."
+          echo "Contract: every attacks/NN-*/exploit.py exits 0 vulnerable, non-zero hardened."
+          echo "This job must turn red the day a control stops working."

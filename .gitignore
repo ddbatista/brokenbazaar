@@ -1,0 +1,25 @@
+# build output
+/out/
+app/api/api
+*.exe
+
+# local env — never commit credentials, even fake ones
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# lab artifacts
+*.log
+/tmp/
+detections/replay-output/

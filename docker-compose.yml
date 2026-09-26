@@ -1,0 +1,58 @@
+# BrokenBazaar — deliberately vulnerable. Localhost only.
+# Every port is bound to 127.0.0.1 on purpose. Do not change that.
+#
+# HARDENED ENVIRONMENT: this file is a hardened zone (see CLAUDE.md).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: bb-db
+    environment:
+      POSTGRES_USER: bazaar
+      POSTGRES_PASSWORD: bazaar
+      POSTGRES_DB: bazaar
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bazaar -d bazaar"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [bazaar]
+
+  api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: bb-api
+    environment:
+      HARDENED: "${HARDENED:-false}"
+      DATABASE_URL: "postgres://bazaar:bazaar@db:5432/bazaar?sslmode=disable"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/api", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [bazaar]
+
+  # --- Services below arrive with their modules ---------------------------
+  # gateway         (M2) Python judge + OPA sidecar, ported from jev-lab
+  # agent           (M2) Go agent loop
+  # mock-metadata   (M2) fake cloud metadata endpoint, makes SSRF reproducible
+  #                      without a cloud account
+  # evil-mcp        (M4a) attacker-controlled MCP server        [hostile fixture]
+  # evil-publisher  (M4b) mutable skill-reference host          [hostile fixture]
+
+volumes:
+  db-data:
+
+networks:
+  bazaar:
+    driver: bridge
