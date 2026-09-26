@@ -157,10 +157,6 @@ Features ship one module at a time; each module is independently runnable.
 - Skill index (descriptions) and skill loader (bodies)
 - Declared capabilities are reconciled against the session's grants
 
-### M5 — Cloud Estate *(optional track)*
-- Terraform for a dedicated GCP project: VPC, private subnets, Cloud NAT, Workload Identity Federation, Secret Manager, per-component service accounts, Org Policy constraints
-- Deployment to Cloud Run behind Cloud Armor
-
 ### M6 — Program
 - Pipeline self-assessment, framework mappings, coverage reporting, and the published write-up set
 
@@ -222,6 +218,7 @@ Explicitly out of scope. These are not oversights, and PRs adding them will be d
 | **Frontend beyond curl/htmx** | The interesting behaviour is server-side; a SPA would only add noise |
 | **Real LLM provider dependency in CI** | The agent loop must be runnable deterministically and offline |
 | **Multi-region / HA / scale** | The lab is about correctness of authority, not availability |
+| **Cloud deployment topology** | Deferred — not specified in this revision. The product runs in Docker Compose on localhost; where it might be hosted is a separate question, taken up later if at all |
 | **Mobile clients** | — |
 | **Web-tier vulnerability breadth** | Covered well by general-purpose vulnerable web apps; not this project's trade |
 
