@@ -12,9 +12,11 @@ threat model → build → attack → defend → regression test → detect → 
 
 ## What this is not
 
-**Use [OWASP Juice Shop](https://owasp.org/www-project-juice-shop/) for web-vulnerability breadth.** It wins there and this project does not compete with it.
+**This is not a breadth catalogue of web vulnerabilities.** If you want a wide inventory of injection, XSS, CSRF and access-control exercises to drill against, use a general-purpose deliberately-vulnerable web application — that ground is already well covered, and this project does not try to compete there.
 
-BrokenBazaar goes the other way: **few vulnerabilities, complete lifecycles.** Ten findings total, each one carried from threat model through to a measured detection rule and a written control rationale. The interesting surface here is the *agent* — delegation, tool capability, and the marketplace supply chain — not XSS.
+BrokenBazaar makes the opposite trade: **few vulnerabilities, complete lifecycles.** Ten findings total, each one carried from threat model → PoC → control → regression test → measured detection → written rationale for *why that control*. Depth per finding is the product; count is not.
+
+The surface that matters here is the **agent**: delegation, tool capability, the context supply chain, and the marketplace that feeds both. The web tier exists only far enough to make those reachable.
 
 ## Status
 
