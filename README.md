@@ -30,7 +30,6 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 | M3 Delegation & Confused Deputy | B3, B5, B8 | ⬜ not started |
 | M4a Marketplace (MCP) | B6 | ⬜ not started |
 | M4b Marketplace (Skills) | B9 | ⬜ not started |
-| M5 Cloud Estate | B7 | ⬜ optional track |
 | M6 Publish & Program | — | ⬜ not started |
 
 ## Trust boundaries
