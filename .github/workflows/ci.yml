@@ -33,7 +33,10 @@ jobs:
 
       - name: go build
         working-directory: app
-        run: go build ./...
+        # Output to a directory: bare `go build ./...` would try to write a
+        # binary named "api" into app/, which collides with the app/api/
+        # package directory and fails.
+        run: go build -o /tmp/bb-build/ ./...
 
       - name: gofmt check
         working-directory: app
