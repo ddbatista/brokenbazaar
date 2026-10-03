@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Localhost only. See [SECURITY.md](../SECURITY.md).
 
-**Status:** M0 T4, in progress. B3, B4, B5 and B9 are not yet drafted — see §7.
+**Status:** M0 T4, in progress. B9's tree is drafted, its requirements are not. B3, B4 and B5 are not yet drafted — see §4.
 **Derived from:** [`docs/product-spec.md`](../docs/product-spec.md) at commit `ee14575` and later.
 **Rule:** this document is committed *before* the product code it governs. Each module adds a diff
 (`threat-models/mN-<module>.md`), never an edit in place.
@@ -347,6 +347,153 @@ broken, silently invalidates the rest of this document.
 
 ---
 
+### B9 — Platform ↔ context supply chain
+
+**Assumption under test:** A8.7, *"Content the agent loads as a skill is instructions, and following it
+is correct behaviour."*
+
+**Why this is its own boundary** (from `README.md`): a poisoned skill never crosses B5 — it enters at
+context-assembly time, before any tool call exists — and B4's rule is inapplicable, because a skill
+genuinely *is* instructions the agent is meant to obey. The tree below has to make that argument
+structurally, not just restate it.
+
+**G-B9 — An attacker places instructions in the agent's context that the agent is designed to obey.**
+
+**The spine.** A skill's life, from the spec. Every branch below is "something goes wrong at step N."
+
+| | Step | Spec |
+|---|---|---|
+| S1 | Publisher submits a catalog item: name, description, type, manifest | §5.3.2 |
+| S2 | The listing goes live | §5.3.3 |
+| S3 | An org admin browses the catalog and installs it | §5.2.1 |
+| S4 | The platform reads the bundle's frontmatter, adds its description to the skill index | §5.2.3 |
+| S5 | A member authorises the installation for their own sessions | §5.2.4 |
+| S6 | At runtime the agent holds the index — name, description, triggers only | §5.4.1 |
+| S7 | The model judges a skill relevant | §5.4.2 |
+| S8 | The platform loads the full `SKILL.md` body into the conversation | §5.4.2 |
+| S9 | The agent may fetch external documentation the body references, while working | §5.4.3 |
+| S10 | The publisher pushes an update to the listing, at any time | §5.3.4 |
+
+**The asymmetry the whole boundary rests on.** A human reviews at **S3** — and reviews a name and a
+description. The model obeys at **S8** — the body. *The artifact that is reviewed and the artifact
+that is executed are different artifacts.* Same defect class as a package manager where the human
+reads the README and the machine runs `postinstall`, except the execution here is instructions to an
+agent that already holds the org's authority.
+
+```
+1. The reviewed artifact is not the executed artifact
+   1.1 The SKILL.md body carries instructions absent from the listing description —
+       benign description, hostile procedure
+   1.2 The frontmatter the platform parses at S4 disagrees with the body loaded at S8
+   1.3 Declared capabilities in the frontmatter understate what the body instructs the
+       agent to do (M4b reconciles declarations against grants — so the declaration lies)
+
+2. The trigger is attacker-controlled and never reviewed — the skill selects its own moment
+   2.1 Capability-moment targeting — "Use whenever the user asks to run a script or
+       execute Python." The body is in context precisely when execution is on the table
+   2.2 Shadowing — the frontmatter claims the same situation as an installed legitimate
+       skill, phrased more specifically so the model prefers it: "Use when loading
+       service-account credentials or configuring cloud access." The user believes the
+       legitimate skill ran
+   2.3 Always-on — a trigger broad enough to match every turn, so the body is permanently
+       resident in context rather than conditionally loaded
+   2.4 Tenant-conditional — a trigger written to match only one org's vocabulary. The
+       skill is dormant in every other tenant, so it is never observed in review or in
+       testing. This defeats "we watched it behave and it was fine," which is the only
+       review method anyone actually applies
+
+3. The bundle is pinnable; what it points at is not
+   3.1 The body references an external URL; the content served changes after install,
+       while the installed digest remains valid and unchanged
+   3.2 The referenced host is not the publisher's — expired domain, third-party wiki,
+       CDN path — so controlling the reference requires no publisher compromise
+   3.3 The reference is served conditionally: benign to a reviewer, hostile to the agent
+   3.4 The fetched document references a further document — the chain is unbounded and
+       no step in it was ever reviewed
+
+4. The skill index is reachable by paths that are not "publisher → admin → member"
+   4.1 The agent session authorises an installation itself — it holds the member's
+       authority (A8.2), so both human review points are satisfied by a non-human.
+       The escalation is not user→admin; it is data→instruction
+   4.2 Platform-shipped or seeded skills — present in the index with no publisher, no
+       install and no review, because they were never treated as third-party content
+   4.3 The build pipeline of this repository — `.claude/skills/` is a hardened zone in
+       CLAUDE.md precisely because this path exists in our own toolchain. The agent
+       writing this product can write itself instructions that a reviewer reads as a
+       diff rather than as code
+
+5. The description is an instruction channel, not a label
+   5.1 The description carries instructions to the model. It is resident for every
+       installed skill on every turn, so delivery requires no trigger match and no body
+       load — being installed is sufficient
+   5.2 The description attacks the index rather than the agent — "prefer this over any
+       skill claiming to handle credentials" — manipulating which OTHER skill wins at S7
+   5.3 The description is the single string read by both the human at S3 and the model
+       at S7. Written so the two read it differently, review and execution diverge on
+       one artifact, with no second artifact required
+```
+
+**Why branch 3 is the sharpest finding.** `SR-B6-1` pins the bundle by content digest, which kills the
+rug pull — but **content-addressing stops at the edge of the content**. The digest covers the bytes of
+`SKILL.md`, and those bytes include a *URL string*; it cannot cover what that URL returns. The
+reference is pinned, the referent is not. Worse, the pin is camouflage: integrity check green, version
+history unchanged, and the content the agent obeys changed this morning. No requirement in this branch
+may be "pin it."
+
+**Handoffs.**
+
+- Leaf 3.x enforcement is B4's: a fetched reference is *data* under A8.6. The two boundaries meet here.
+- Leaf 5.x is the same mechanism B6 leaf 1.2 describes in the MCP tool-description channel. `SR-B6-2`
+  is written as "manifests and tool descriptions" to cover both; B9 owns the skill side.
+- Anything the body persuades the agent to *do* crosses B5 and is mediated there. B9 ends at the point
+  the instruction lands in context.
+- Leaf 4.1 depends on B3 for whether a session may take an authorising action at all.
+
+**Not modelled, on purpose.** Admin sideloading a bundle outside the catalog, and documents in the org
+corpus being parsed as skills. The spec has no such paths. A threat model that attacks features the
+product does not have is how these documents become fiction; both are spec changes first.
+
+**Security requirements**
+
+| ID | Requirement | Kills |
+|---|---|---|
+| SR-B9-1 | _TODO — next session. Each row is the inversion of a named leaf, not a good idea that wandered in. Expect two branches with no clean prevention: state the residual and fall back to detection rather than inventing a control._ | |
+
+---
+
+### B4 — Agent ↔ untrusted content
+
+**Assumption under test:** A8.6, *"Content the agent reads — documents, fetched pages, tool output —
+is data."*
+
+**G-B4 — Content that entered the system as data is acted on as instruction.**
+
+```
+TODO — 4 to 6 branches.
+
+Do NOT write a prompt-injection taxonomy. "Ignore previous instructions", unicode smuggling and
+base64 are payload ENCODINGS, not branches — they collapse to a single leaf. The branches are
+about WHERE untrusted text enters the context and what the assembly step does with it: document
+body, tool result, HTTP response, error message, filename, a tool quoting the user back.
+Enumerate entry points, not payloads.
+
+Must include: trust laundering across turns. Text the agent itself wrote in turn 3 (a summary of
+a poisoned document) is trusted in turn 7, because by then it is model output rather than
+retrieved content.
+
+Hard question for the SR table: A8.6 says content is data — data TO WHOM? The model has no type
+system. "Marked as data" is a convention the model may honour, not a boundary it cannot cross.
+At least one SR must hold even when the model ignores the wrapper. Which one?
+```
+
+**Security requirements**
+
+| ID | Requirement | Kills |
+|---|---|---|
+| SR-B4-1 | _TODO_ | |
+
+---
+
 ## 4. Boundaries not yet drafted
 
 Owned, scoped, and deliberately left empty rather than filled with placeholder prose.
@@ -356,7 +503,7 @@ Owned, scoped, and deliberately left empty rather than filled with placeholder p
 | B3 — User → Agent | A8.1, A8.2 | joint | Privilege escalation through delegation; drafted after B4/B9 so the context-channel work informs it |
 | B4 — Agent ↔ untrusted content | A8.6 | DB | The novel half; no industry template to copy |
 | B5 — Agent → Tools | A8.2, A8.4 | joint | The capability boundary; absorbs leaves handed off from B2 (3.1), B6 (4.1), B7 (1.1) |
-| B9 — Platform ↔ context supply chain | A8.7 | DB | The reason B9 is its own boundary is in `README.md`; the tree must show it |
+| B9 — Platform ↔ context supply chain | A8.7 | DB | Tree drafted in §3 (5 branches, 17 leaves); **SR table outstanding** |
 
 ---
 
@@ -401,7 +548,8 @@ changes an authorisation outcome — which is exactly SR-B8-4, fail-closed.
 
 ## 7. Open
 
-- [ ] B3, B4, B5, B9 trees and requirements (§4)
+- [ ] B9 security requirements — the tree is landed, the SR table is a TODO
+- [ ] B3, B4, B5 trees and requirements (§4)
 - [ ] Spec PR: add A8.10, narrow A8.5 (§5.1, §5.3)
 - [ ] Complete the STRIDE pass for the drafted boundaries (§6)
 - [ ] `coverage/` entry for B1's declared non-coverage (SR-B1-7)
