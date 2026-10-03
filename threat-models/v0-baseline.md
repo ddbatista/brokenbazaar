@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Localhost only. See [SECURITY.md](../SECURITY.md).
 
-**Status:** M0 T4, in progress. B5 is the only boundary outstanding — see §4.
+**Status:** M0 T4 — all nine boundaries drafted. Coverage summary in §4; open follow-ups in §7.
 **Derived from:** [`docs/product-spec.md`](../docs/product-spec.md) at commit `ee14575` and later.
 **Rule:** this document is committed *before* the product code it governs. Each module adds a diff
 (`threat-models/mN-<module>.md`), never an edit in place.
@@ -698,13 +698,135 @@ the requester may, and the agent's own rights never enter the computation.
 
 ---
 
-## 4. Boundaries not yet drafted
+### B5 — Agent → Tools (the capability boundary)
 
-Owned, scoped, and deliberately left empty rather than filled with placeholder prose.
+**Assumptions under test:** A8.2, *"An agent session acts within the authority of the user it was
+created for"*; A8.4, *"A tool does what its description says it does."*
 
-| Boundary | Assumption | Owner | Note |
+**Framing — this is the collecting point.** Five boundaries hand leaves to B5, and what they have in
+common is that *nothing in them is forged*. A real session, a real grant, a real tool, an allowlisted
+host. The attack succeeds through machinery working exactly as designed:
+
+| Handed from | Leaf |
+|---|---|
+| B2 3.1 | a session resolves a document by id with no org scope |
+| B6 4.1 | one hostile listing installed by many orgs |
+| B6 2.3 | *(residual)* a server honest at review, hostile in production |
+| B7 1.1 | `http_fetch` reaches the metadata endpoint |
+| B4 5.1, 5.2 | tenant data shaped into an allowlisted destination |
+| B9 (all) | whatever the skill body persuaded the agent to do |
+
+**The thesis.** Every one of those arrives at the same instant — a tool call about to execute — and
+the single property that defeats all six is a rule about *provenance of the decision*, not about what
+the decision checks:
+
+> **The decision derives only from state the platform owns** — the session's capability set, the
+> fully-resolved target, and policy — **and never from anything the request can influence**: not the
+> tool's own description, not the model's stated justification, not the result of a previous call.
+
+A tool description is publisher-controlled (B6 1.2). A justification is model output derived from
+untrusted content (B4 3.1). A prior result is attacker-supplied (B4 1.2). Any gate that consults them
+is letting the attacker write its policy.
+
+**G-B5 — A tool call executes with authority, scope or destination that no entitled principal
+granted it.**
+
+```
+1. The decision is derived from attacker-influenceable input
+   1.1 The tool's own description or manifest informs whether the call is allowed  → B6 1.2
+   1.2 The model's justification ("the user asked me to") is treated as evidence
+   1.3 The call is classified by tool name rather than by its resolved effect
+   1.4 A previous tool result widens what the next call may do
+
+2. Mediation is incomplete — execution paths that do not pass the gate
+   2.1 A built-in or first-party tool bypasses the gateway because it is "internal"
+   2.2 The MCP client's own traffic — discovery, health checks, reconnects — is not
+       treated as a mediated call                                          → B6 3.1
+   2.3 Chained or batched calls where only the first is evaluated
+   2.4 A retry or a redirect re-executes without re-evaluation             → B7 1.2
+
+3. The decision is correct, but stale or too coarse
+   3.1 Evaluated once per session rather than per call                     → B3 1.3
+   3.2 Allow/deny on the tool name alone, ignoring arguments — scope, target org,
+       destination
+   3.3 The decision ignores the data crossing the call: an allowlisted host is permitted
+       regardless of payload                                          → B4 5.1, B7 3.1
+
+4. The gate's own failure modes
+   4.1 Judge timeout or gateway unavailable resolves to allow            → B8 3.2
+   4.2 The audit record is written after execution, so a crash loses it, or it records
+       the request and never the outcome
+   4.3 Time-of-check to time-of-use: the argument is re-resolved after the decision —
+       DNS rebinding, a redirect, a changed symlink — so the executed target is not
+       the evaluated one
+   4.4 The gate is exhausted deliberately to force a degraded path
+
+5. Legitimate capability, illegitimate aggregation
+   5.1 Every call in a sequence is individually permitted, and the sequence exfiltrates:
+       read a document, then fetch an allowlisted host carrying a slice of it
+   5.2 One publisher's tool, installed by many orgs, aggregates cross-tenant data at the
+       publisher's end                                                     → B6 4.1
+   5.3 A permitted read repeated until the corpus is drained
+```
+
+**Security requirements**
+
+| ID | Requirement | Kills | Kind |
 |---|---|---|---|
-| B5 — Agent → Tools | A8.2, A8.4 | joint | The capability boundary; absorbs leaves handed off from B2 (3.1), B6 (4.1), B7 (1.1) |
+| SR-B5-1 | **The decision derives only from platform-owned state**: the session capability set (`SR-B3-2`), the fully-resolved target, and policy. No attacker-influenceable value is an input — not the tool's self-description, not the model's justification, not a prior result. | 1.1–1.4 | prevent |
+| SR-B5-2 | **Every tool call is mediated, with no privileged bypass.** Built-ins, MCP discovery, health checks, reconnects and retries pass the same gate. Mediation is a property of the execution path — there is one way to invoke a tool — not a decorator someone remembers to apply. | 2.1–2.4 | prevent |
+| SR-B5-3 | **Evaluation is per call, on fully-resolved arguments** (post-normalisation, post-DNS, post-redirect), and **the resolved value is what executes.** No re-resolution occurs between decision and execution. | 3.1, 3.2, 4.3 | prevent |
+| SR-B5-4 | **The decision considers the data crossing the call, not only the destination.** Tenant-derived payload is a denial regardless of how the destination is classified (shares `SR-B7-2`, `SR-B4-12`). | 3.3 | constrain |
+| SR-B5-5 | **The gate fails closed.** Timeout, undefined policy result or an unreachable gateway denies (shares `SR-B8-4`). Verified by fault injection. | 4.1, 4.4 | prevent |
+| SR-B5-6 | **The audit record is written before execution and completed after it**, is durable across a crash, and is redacted at write time (`SR-B7-5`). A call with no pre-record does not execute. | 4.2 | prevent |
+| SR-B5-7 | **Capability is bounded in volume and rate per session**, and aggregate reads are accounted across the session rather than per call. | 5.3 | constrain |
+| SR-B5-8 | **Calls to a publisher endpoint carry a per-installation identity** (`SR-B6-5`), so cross-org aggregation is attributable to an installation rather than anonymous at the publisher's end. | 5.2 | constrain |
+| SR-B5-9 | **Every decision is logged with its inputs and its outcome.** Denials are high-signal; an allow that followed a denied attempt for the same objective is higher. | — | observe |
+
+**Residual (5.1) — sequence-level exfiltration.** A sequence in which every individual call is
+correctly permitted cannot be denied call-by-call without denying the product's function. SR-B5-4
+raises the cost by inspecting payload, and SR-B5-7 bounds volume, but the general case requires
+session-level flow accounting that this lab does not build. Accepted and recorded; the compensating
+position is detection (SR-B5-9) plus the fact that SR-B5-4 makes the obvious encodings fail.
+
+**Residual (B6 2.3 inherited).** A tool that behaves correctly at review and hostilely in production
+is not distinguishable at B5 either — but it does not need to be. SR-B5-1 means the tool's reputation
+was never an input to the decision: a hostile tool gets exactly the authority its installation was
+granted and no more. **Mediation makes trustworthiness irrelevant**, which is the reason the residual
+is tolerable.
+
+**Why this boundary is the product.** B1–B4 and B6–B9 describe ways authority can be obtained,
+confused or smuggled. B5 is the one place where authority is *spent*. A control here is worth more
+than a control anywhere else, because it is the only one that sees every attack from every other
+boundary arrive in the same shape.
+
+---
+
+## 4. Coverage
+
+All nine boundaries are drafted. Every assumption in spec §8 is tested by at least one of them (§2),
+and no leaf is owned by more than one.
+
+| Boundary | Assumption | Branches | Leaves | SRs | Residuals |
+|---|---|---|---|---|---|
+| B1 Internet → API | §3 preamble | 4 | 10 | 7 | accepted exposure: `/healthz` hardened flag |
+| B2 Tenant ↔ Tenant | A8.3 | 4 | 11 | 8 | — |
+| B3 User → Agent | A8.1, A8.2 | 5 | 17 | 9 | — |
+| B4 Agent ↔ untrusted content | A8.6 | 5 | 20 | 14 | 4.1 answer influence · 3.x label fidelity |
+| B5 Agent → Tools | A8.2, A8.4 | 5 | 17 | 9 | 5.1 sequence exfiltration · B6 2.3 inherited |
+| B6 Platform ↔ Publisher | A8.4, A8.5 | 5 | 13 | 8 | 2.3 behaviour conditioned on caller |
+| B7 App → Cloud | A8.9 | 5 | 11 | 7 | — |
+| B8 Control ↔ data plane | A8.8, A8.9 | 5 | 11 | 8 | — |
+| B9 Platform ↔ context supply chain | A8.7 | 5 | 17 | 15 | 2.4 tenant-conditional trigger · 5.1 description channel |
+
+**One rule was rediscovered from three independent directions** — `SR-B8-2` (no agent-reachable tool
+may mutate policy), `SR-B9-10` (installing a skill is a control-plane action), `SR-B3-7` (control-plane
+actions are not delegable to a session). They are one line: *authority is delegable; the authority to
+change the delegation is not.* A requirement that keeps reappearing from unrelated derivations is
+load-bearing, and it is the first thing to build.
+
+**Eight residuals are stated rather than closed.** A tree with no residuals is not a thorough tree; it
+is a dishonest one.
 
 
 ---
@@ -749,6 +871,7 @@ Marked when done.
 | B9 | ✅ 2.2, 5.3 | ✅ 1.x, 3.x | ✅ 2.2, 5.1 | ⬜ | ⚠️ 2.3 | ✅ 4.1 |
 | B4 | ✅ 2.2, 1.5 | ✅ 2.x, 3.x | ✅ 4.2, 3.4 | ✅ 5.x | ⬜ | ✅ 4.x |
 | B3 | ✅ 3.2 | ✅ 3.1 | ✅ 5.x | ⬜ | ⚠️ 2.3 | ✅ 1.x, 4.x |
+| B5 | ✅ 1.2 | ✅ 4.3 | ✅ 4.2 | ✅ 5.x | ✅ 4.1, 4.4 | ✅ 1.x, 3.x |
 
 ⬜ = not yet checked, not "no threats exist." ⚠️ = checked, thin by design.
 Denial of service is consistently thin across this model: availability is out of scope by declaration
@@ -759,7 +882,7 @@ changes an authorisation outcome — which is exactly SR-B8-4, fail-closed.
 
 ## 7. Open
 
-- [ ] B5 tree and requirements (§4)
-- [ ] Spec PR: add A8.10, narrow A8.5 (§5.1, §5.3)
+
+- [ ] Spec PR: add A8.10, narrow A8.5 and A8.6 (§5)
 - [ ] Complete the STRIDE pass for the drafted boundaries (§6)
 - [ ] `coverage/` entry for B1's declared non-coverage (SR-B1-7)
