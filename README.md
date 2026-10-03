@@ -1,5 +1,7 @@
 # BrokenBazaar
 
+[![ci](https://github.com/ddbatista/brokenbazaar/actions/workflows/ci.yml/badge.svg)](https://github.com/ddbatista/brokenbazaar/actions/workflows/ci.yml)
+
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Every vulnerability in it is intentional and documented. Run it on localhost only — never deploy it to a public network, never point it at real credentials or data, and never reuse its code in a production system. BrokenBazaar is fictional and unaffiliated with any company or product of a similar name.
 
 A multi-tenant **AI agent marketplace**: orgs install third-party agent tools (MCP servers) and skill bundles, and an agent acts on their behalf. It is built to be broken, then fixed, on purpose.
@@ -20,17 +22,38 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 
 ## Status
 
-**M0 — Foundation.** Repo scaffolded; product spec and threat model v0 land before any product code.
+**M0 — Foundation: complete.** The product spec and the threat model are committed, and the commit
+history shows them landing *before* any product code — which is the point of doing it in this order.
+
+[`threat-models/v0-baseline.md`](threat-models/v0-baseline.md) — **9 boundaries · 43 branches ·
+127 leaves · 85 security requirements · 8 stated residuals.** It is derived from the nine *stated
+assumptions* in [`docs/product-spec.md`](docs/product-spec.md) §8 rather than from a component
+diagram, because an assumption is the only thing in a spec that can be proven false. Every security
+requirement is the inversion of a named leaf and cites the leaves it kills; every leaf is written so
+that it could be an `exploit.py`.
+
+Two things in it worth reading even if you never run this code:
+
+- **§5 — what the derivation found about the *spec*.** Three defects, including an assumption §8
+  never stated (the platform's own runtime identity — exactly where SSRF-to-metadata lives) and one
+  that is false as written (content the agent reads is not "data" to a model that has no type
+  system). They are raised, not silently patched.
+- **The residuals.** Eight leaves that are *not* closed, stated with their compensating positions. A
+  threat model that closes every leaf is not thorough, it is dishonest.
 
 | Module | Boundary | Status |
 |---|---|---|
-| M0 Foundation | — | 🚧 in progress |
+| M0 Foundation | — | ✅ complete |
 | M1 Tenancy & Identity | B1, B2 | ⬜ not started |
 | M2 Agent & Tool Gateway | B3, B4, B5 | ⬜ not started |
 | M3 Delegation & Confused Deputy | B3, B5, B8 | ⬜ not started |
 | M4a Marketplace (MCP) | B6 | ⬜ not started |
 | M4b Marketplace (Skills) | B9 | ⬜ not started |
 | M6 Publish & Program | — | ⬜ not started |
+
+**Next: M1 — Tenancy & Identity.** Its requirements are already written (`SR-B2-1` … `SR-B2-8`), and
+its two exploits are pre-assigned to named leaves: `attacks/01-cross-tenant-read` → B2 leaf 2.3,
+`attacks/02-jwt-org-claim` → B2 leaf 1.3.
 
 ## Trust boundaries
 
