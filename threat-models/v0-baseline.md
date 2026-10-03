@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Localhost only. See [SECURITY.md](../SECURITY.md).
 
-**Status:** M0 T4, in progress. B4 and B9 are complete. B3 and B5 are not yet drafted — see §4.
+**Status:** M0 T4, in progress. B5 is the only boundary outstanding — see §4.
 **Derived from:** [`docs/product-spec.md`](../docs/product-spec.md) at commit `ee14575` and later.
 **Rule:** this document is committed *before* the product code it governs. Each module adds a diff
 (`threat-models/mN-<module>.md`), never an edit in place.
@@ -625,13 +625,85 @@ B4 can discharge it.
 
 ---
 
+### B3 — User → Agent
+
+**Assumptions under test:** A8.1, *"A user's membership role reflects what they are allowed to do in
+that org"*; A8.2, *"An agent session acts within the authority of the user it was created for."*
+
+**Framing.** A8.2 is the assumption that makes the whole product safe to offer, and it is stated as a
+fact rather than as a mechanism. B3 asks what has to be true for it to hold. The failure mode here is
+not that the agent is tricked — that is B4 — but that the agent *legitimately* holds more authority
+than the person asking, and the gap is exploitable without any deception at all.
+
+**G-B3 — A principal obtains, through the agent, authority it does not hold directly.**
+
+```
+1. The agent carries more authority than its requester
+   1.1 The agent runs with a service identity or a fixed elevated role rather than with
+       the requesting user's authority — ambient authority by construction
+   1.2 A viewer asks the agent to delete a document and it succeeds, because the delete
+       path checks the agent's right to act and not the requester's — confused deputy
+   1.3 Role is resolved once at session creation. The user is demoted and the session
+       keeps the authority it was minted with
+   1.4 The session outlives the membership entirely — the user is removed from the org
+       and the session continues to act in it
+
+2. The session's scope is wider than the request that created it
+   2.1 Sessions are created with every installed grant in scope, rather than with the
+       grants the task needs
+   2.2 A session created in one org acts on another org's resources      → owned by B2 (3.1)
+   2.3 No time bound: an abandoned or stolen session is durable authority
+
+3. Authority is asserted rather than derived
+   3.1 Role and grants are read from the session record as supplied, not from a
+       server-side membership lookup                                  → shares SR-B2-2
+   3.2 The agent asserts "the user authorised this" with no artifact that proves it
+
+4. Escalation through the asking rather than through the acting
+   4.1 The user asks for an admin action and the agent performs it, because the check
+       applied is "may the agent do this" rather than "may this user have this done"
+   4.2 The user instructs the agent to change a grant, a session scope or the skill index
+       — a control-plane action reached through delegation      → shares SR-B8-2, SR-B9-10
+   4.3 Self-escalation: the session requests additional grants and the same session's
+       authority is what approves them
+
+5. Attribution loss
+   5.1 Actions are logged as the user, so an action the agent took while the user was
+       absent is indistinguishable from one the user performed
+   5.2 No record of which authority was relied on — user permission, org grant, or a
+       skill's declared capability — so a later review cannot reconstruct the decision
+```
+
+**Security requirements**
+
+| ID | Requirement | Kills | Kind |
+|---|---|---|---|
+| SR-B3-1 | **The session is its own principal.** It has its own identity and never acts *as* the user. Spec §3.3 already states this; B3 requires it be enforced rather than described. | 1.1, 5.1 | prevent |
+| SR-B3-2 | **A session's capability set is an intersection, evaluated per action**: user permissions ∩ org grants ∩ session scope ∩ time bound ∩ declared capabilities of loaded skills. Never a union, never a flag. | 1.1, 2.1 | prevent |
+| SR-B3-3 | **Authority is re-derived at action time** from server-side records, never cached at session creation. Demotion or removal of membership takes effect on the next action. | 1.3, 1.4, 3.1 | prevent |
+| SR-B3-4 | **Sessions are time-bound** and expiry is enforced server-side, independent of the client. | 2.3 | constrain |
+| SR-B3-5 | **Sessions are created least-privilege.** No installation is in scope unless explicitly requested and authorised for that session. | 2.1 | prevent |
+| SR-B3-6 | **A session may not widen its own scope.** Any scope change requires a fresh user action taken outside the conversation. | 4.3 | prevent |
+| SR-B3-7 | **Control-plane actions are not delegable to a session**, regardless of the requesting user's role. Same rule as `SR-B8-2` and `SR-B9-10`. | 4.2 | prevent |
+| SR-B3-8 | **The agent is a ceiling, never a source.** An action requested through the agent is permitted only if the requesting user could perform it directly. The agent can only ever narrow authority, never add to it. | 1.2, 4.1 | prevent |
+| SR-B3-9 | **Every action records actor (session), acting-for (user), and which authority was relied on.** An agent-initiated action is distinguishable from a human one in the audit record. | 3.2, 5.1, 5.2 | observe |
+
+**SR-B3-8 is the keystone.** Every confused-deputy failure in a delegated system is a case of the
+deputy being treated as a *source* of authority rather than as a *conduit* for someone else's. Written
+as a ceiling, the question "may the agent do this?" becomes unaskable — the only question is whether
+the requester may, and the agent's own rights never enter the computation.
+
+**Exploits (M3):** `attacks/05-confused-deputy` → leaf 1.2 · `attacks/06-policy-plane` → leaf 4.2
+(owned by B8).
+
+---
+
 ## 4. Boundaries not yet drafted
 
 Owned, scoped, and deliberately left empty rather than filled with placeholder prose.
 
 | Boundary | Assumption | Owner | Note |
 |---|---|---|---|
-| B3 — User → Agent | A8.1, A8.2 | joint | Privilege escalation through delegation; drafted after B4/B9 so the context-channel work informs it |
 | B5 — Agent → Tools | A8.2, A8.4 | joint | The capability boundary; absorbs leaves handed off from B2 (3.1), B6 (4.1), B7 (1.1) |
 
 
@@ -676,6 +748,7 @@ Marked when done.
 | B8 | ⬜ | ✅ 1.x, 2.x | ✅ 5.x | ⬜ | ✅ 3.2 | ✅ 1.2 |
 | B9 | ✅ 2.2, 5.3 | ✅ 1.x, 3.x | ✅ 2.2, 5.1 | ⬜ | ⚠️ 2.3 | ✅ 4.1 |
 | B4 | ✅ 2.2, 1.5 | ✅ 2.x, 3.x | ✅ 4.2, 3.4 | ✅ 5.x | ⬜ | ✅ 4.x |
+| B3 | ✅ 3.2 | ✅ 3.1 | ✅ 5.x | ⬜ | ⚠️ 2.3 | ✅ 1.x, 4.x |
 
 ⬜ = not yet checked, not "no threats exist." ⚠️ = checked, thin by design.
 Denial of service is consistently thin across this model: availability is out of scope by declaration
@@ -686,7 +759,7 @@ changes an authorisation outcome — which is exactly SR-B8-4, fail-closed.
 
 ## 7. Open
 
-- [ ] B3 and B5 trees and requirements (§4)
+- [ ] B5 tree and requirements (§4)
 - [ ] Spec PR: add A8.10, narrow A8.5 (§5.1, §5.3)
 - [ ] Complete the STRIDE pass for the drafted boundaries (§6)
 - [ ] `coverage/` entry for B1's declared non-coverage (SR-B1-7)
