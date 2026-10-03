@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Localhost only. See [SECURITY.md](../SECURITY.md).
 
-**Status:** M0 T4, in progress. B9's tree is drafted, its requirements are not. B3, B4 and B5 are not yet drafted — see §4.
+**Status:** M0 T4, in progress. B9 is complete. B3, B4 and B5 are not yet drafted — see §4.
 **Derived from:** [`docs/product-spec.md`](../docs/product-spec.md) at commit `ee14575` and later.
 **Rule:** this document is committed *before* the product code it governs. Each module adds a diff
 (`threat-models/mN-<module>.md`), never an edit in place.
@@ -455,9 +455,52 @@ product does not have is how these documents become fiction; both are spec chang
 
 **Security requirements**
 
-| ID | Requirement | Kills |
-|---|---|---|
-| SR-B9-1 | _TODO — next session. Each row is the inversion of a named leaf, not a good idea that wandered in. Expect two branches with no clean prevention: state the residual and fall back to detection rather than inventing a control._ | |
+Each row is marked **prevent** (the leaf becomes unreachable by construction), **constrain** (the
+leaf still works, bounded blast radius) or **observe** (prevention failed; make it loud). Two rows
+that are never acceptable in this table: *"the model should not obey injected instructions"* — a
+hope, not a requirement — and *"review the skill carefully"*, which is the control that already
+failed at leaf 1.1.
+
+| ID | Requirement | Kills | Kind |
+|---|---|---|---|
+| SR-B9-1 | **The artifact presented for approval is the artifact that executes.** The install decision at S3 renders the full `SKILL.md` body, and the approval is recorded against a digest of those exact bytes. A body whose digest does not match an approval does not load at S8. | 1.1, 1.2 | prevent |
+| SR-B9-2 | **Declared capabilities are an enforced ceiling, not documentation.** At tool-call time the session intersects (user permissions, org grants, session scope, declared capabilities of the loaded skill); an undeclared capability is denied even when the user holds it. Understating a declaration therefore buys the attacker *less* authority, not more. Enforced at B5. | 1.3 | constrain |
+| SR-B9-3 | **A trigger decides what is loaded, never what is permitted.** The session's capability set is unchanged by which skill fired. Trigger control buys context presence only. | 2.1 | constrain |
+| SR-B9-4 | **Skill selection is deterministic and attributable.** Where two skills claim the same situation, resolution is by declared precedence (platform > reviewed > third-party), never by which description reads more persuasively to the model. Selection is removed from the model's discretion, so the persuasion contest has nothing to win. | 2.2 (selection) | prevent |
+| SR-B9-5 | **Every skill load is disclosed to the user** in the response — which skill, which publisher, which version. The user is never left believing a different skill ran. | 2.2 (deception) | observe |
+| SR-B9-6 | **Every skill load is logged** with session, org, tenant and matched trigger. Load frequency is monitored across the fleet: a skill loading in substantially every session, or in exactly one tenant, is an outlier and is surfaced. | 2.3, 2.4 | observe |
+| SR-B9-7 | **Classification is by provenance, never by content.** A string's status as instruction or data is fixed by how it entered the context — a reviewed, approved, digest-bound bundle body is instruction; anything fetched at runtime is data — and never by inspecting what it says. | 3.1–3.4 | prevent |
+| SR-B9-8 | **A skill body cannot promote a reference to instruction.** "Follow the procedure at `<URL>`" is inert: no mechanism exists by which fetched content changes class. Enforcement is B4's; B9 states the obligation. | 3.1–3.4 | prevent |
+| SR-B9-9 | **External references are declared in frontmatter**, resolved against an egress allowlist, and each resolution is logged with URL and response digest so a change in the referent is attributable after the fact. An undeclared fetch is denied. | 3.2 | constrain |
+| SR-B9-10 | **Installing or authorising a skill is a control-plane action** and is excluded from the authority a session inherits under A8.2, regardless of the user's role. A session may never add to its own instruction set. Extends `SR-B8-2` to the skill index. | 4.1 | prevent |
+| SR-B9-11 | **Platform-shipped and seeded skills are held to the same digest-bound approval** and enter the same index as third-party ones. "First-party" is a precedence value under SR-B9-4, never an exemption from review. | 4.2 | prevent |
+| SR-B9-12 | **This repository's own pipeline is in scope.** `.claude/skills/` and any `SKILL.md` are a hardened zone; every agent attempt to author a skill file is logged; CI fails on an unreviewed skill-file diff. | 4.3 | prevent |
+| SR-B9-13 | **There is only one rendering.** The description shown for human review at S3 is byte-identical to the string placed in the model's context at S6 — no markdown rendering, no truncation, no collapsing. Unicode is normalised at submission; non-printing, bidi and homoglyph forms are rejected. | 5.3 | prevent |
+| SR-B9-14 | **Descriptions and manifests are untrusted input to the model**: wrapped and marked as data at context assembly (shared with `SR-B6-2`), length-bounded, carrying no authority of their own. | 5.1 | constrain |
+| SR-B9-15 | **Selection precedence is not overridable by description content.** A description cannot demote, exclude or outrank another skill, because precedence is a platform property and not a persuasion outcome. | 5.2 | prevent |
+
+**Residual (2.4) — tenant-conditional triggers.** A trigger written to match only the target tenant's
+vocabulary cannot be detected before install, because in every other tenant the skill is correct.
+SR-B9-6 catches it only across the fleet and only after it has fired somewhere. Accepted: this
+boundary cannot close it, and the compensating position is that SR-B9-3 limits what firing is worth.
+
+**Residual (5.1) — the description channel is irreducible.** Selection at S7 requires the description
+to be in context, so being installed is sufficient for delivery and no prevention exists. Compensating
+position: SR-B9-3 (loading confers no authority), SR-B9-14 (wrapped as data, bounded), SR-B9-6 (loads
+logged, outliers surfaced). Accepted.
+
+**Two derivation notes worth keeping.**
+
+1. *Branch 2 has no static test.* A trigger is natural language and maliciousness is not a property of
+   the string — "use when the user asks to run a script" is the correct trigger for a legitimate
+   Python-helper skill. Any row claiming to detect a malicious trigger by inspection would be a lie in
+   this table. The same argument rules out content-based classification at branch 3, which is why
+   SR-B9-7 is a provenance rule: **when verification is impossible, look for a classification that
+   makes verification unnecessary.**
+2. *Branch 4 is not an RBAC problem.* Role is exactly what the session inherits under A8.2, so RBAC
+   returns the same answer for the agent as for the user. The distinction is the class of action, not
+   the identity of the actor: **authority is delegable; the authority to change the delegation is
+   not.** SR-B9-10 is that line applied to the skill index, and it is the same line as SR-B8-2.
 
 ---
 
@@ -503,7 +546,7 @@ Owned, scoped, and deliberately left empty rather than filled with placeholder p
 | B3 — User → Agent | A8.1, A8.2 | joint | Privilege escalation through delegation; drafted after B4/B9 so the context-channel work informs it |
 | B4 — Agent ↔ untrusted content | A8.6 | DB | The novel half; no industry template to copy |
 | B5 — Agent → Tools | A8.2, A8.4 | joint | The capability boundary; absorbs leaves handed off from B2 (3.1), B6 (4.1), B7 (1.1) |
-| B9 — Platform ↔ context supply chain | A8.7 | DB | Tree drafted in §3 (5 branches, 17 leaves); **SR table outstanding** |
+
 
 ---
 
@@ -538,6 +581,7 @@ Marked when done.
 | B6 | ✅ 1.3, 5.1 | ✅ 2.x | ✅ 2.1 | ✅ 4.1 | ✅ 3.2 | ✅ 3.3 |
 | B7 | ⬜ | ✅ 5.1 | ✅ 5.1 | ✅ 1.x, 2.x, 3.x | ⬜ | ✅ 4.x |
 | B8 | ⬜ | ✅ 1.x, 2.x | ✅ 5.x | ⬜ | ✅ 3.2 | ✅ 1.2 |
+| B9 | ✅ 2.2, 5.3 | ✅ 1.x, 3.x | ✅ 2.2, 5.1 | ⬜ | ⚠️ 2.3 | ✅ 4.1 |
 
 ⬜ = not yet checked, not "no threats exist." ⚠️ = checked, thin by design.
 Denial of service is consistently thin across this model: availability is out of scope by declaration
@@ -548,7 +592,6 @@ changes an authorisation outcome — which is exactly SR-B8-4, fail-closed.
 
 ## 7. Open
 
-- [ ] B9 security requirements — the tree is landed, the SR table is a TODO
 - [ ] B3, B4, B5 trees and requirements (§4)
 - [ ] Spec PR: add A8.10, narrow A8.5 (§5.1, §5.3)
 - [ ] Complete the STRIDE pass for the drafted boundaries (§6)
