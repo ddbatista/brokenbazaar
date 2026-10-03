@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Localhost only. See [SECURITY.md](../SECURITY.md).
 
-**Status:** M0 T4, in progress. B9 is complete. B3, B4 and B5 are not yet drafted — see §4.
+**Status:** M0 T4, in progress. B4 and B9 are complete. B3 and B5 are not yet drafted — see §4.
 **Derived from:** [`docs/product-spec.md`](../docs/product-spec.md) at commit `ee14575` and later.
 **Rule:** this document is committed *before* the product code it governs. Each module adds a diff
 (`threat-models/mN-<module>.md`), never an edit in place.
@@ -509,31 +509,119 @@ logged, outliers surfaced). Accepted.
 **Assumption under test:** A8.6, *"Content the agent reads — documents, fetched pages, tool output —
 is data."*
 
+**Data to whom?** A8.6 is false as written, and the derivation should say so before the tree starts.
+The model has no type system. "This is data" is a *convention the model may honour*, not a boundary
+it cannot cross — there is no mechanism by which marking a span changes what the next token can be.
+The assumption is salvageable only in a narrower form:
+
+> Content the agent reads is data **to the platform**: it carries no authority, and no privileged
+> action is taken because the content asked for it.
+
+That restatement moves the enforcement out of the model's compliance and into the surrounding
+machinery, and it is what every requirement below is written against. (Raised as a spec defect in §5.)
+
+**Why this is not a prompt-injection taxonomy.** "Ignore previous instructions", unicode smuggling,
+base64 and the rest are payload *encodings*. They are one leaf — whichever leaf describes the channel
+they arrive through — and they belong in a PoC, not in a tree. The branches below are **entry points,
+the assembly step, class loss over time, effects that need no tool call, and shaping of permitted
+actions.**
+
 **G-B4 — Content that entered the system as data is acted on as instruction.**
 
 ```
-TODO — 4 to 6 branches.
+1. Entry points — every channel by which untrusted bytes reach the context
+   1.1 A document body in the org's own corpus, returned by read_document. The corpus is
+       not trusted content: any member can write to it, and M1's seeded documents arrive
+       from outside
+   1.2 An HTTP response body returned by http_fetch
+   1.3 Tool output from an installed MCP server — publisher-controlled. B6 owns the
+       artifact; B4 owns its ingestion
+   1.4 Metadata rather than bodies: HTTP headers, redirect targets, content-type,
+       document titles, filenames. The "it's only a short string" exemption
+   1.5 A tool that quotes its own arguments back — user-supplied text re-entering the
+       context wearing the tool's authority
+   1.6 The external reference fetched by a skill body                  ← handed from B9 3.x
 
-Do NOT write a prompt-injection taxonomy. "Ignore previous instructions", unicode smuggling and
-base64 are payload ENCODINGS, not branches — they collapse to a single leaf. The branches are
-about WHERE untrusted text enters the context and what the assembly step does with it: document
-body, tool result, HTTP response, error message, filename, a tool quoting the user back.
-Enumerate entry points, not payloads.
+2. The assembly step has no type system
+   2.1 Untrusted content is concatenated into the same string as system instructions with
+       no separation at all
+   2.2 A delimiter or wrapper exists but is forgeable — the content contains the closing
+       sentinel and resumes in the privileged register
+   2.3 The wrapper is advisory: the model is *asked* to treat the span as data, and the
+       security property depends on it complying
+   2.4 A structured channel collapses to text — a JSON tool result stringified into the
+       prompt loses whatever typing it had
 
-Must include: trust laundering across turns. Text the agent itself wrote in turn 3 (a summary of
-a poisoned document) is trusted in turn 7, because by then it is model output rather than
-retrieved content.
+3. Trust laundering — class is lost as content moves through the agent
+   3.1 The agent summarises a poisoned document in turn 3. In turn 7 that summary is
+       model output, not retrieved content, and nothing marks it as derived
+   3.2 Content is persisted — written as a new document, a note, a memory — and read back
+       later with its provenance stripped
+   3.3 Content crosses a tool boundary and returns: what was fetched from the web is
+       written to the corpus, and is thereafter an org document
+   3.4 Conversation compaction or summarisation rewrites marked spans into unmarked
+       narrative
 
-Hard question for the SR table: A8.6 says content is data — data TO WHOM? The model has no type
-system. "Marked as data" is a convention the model may honour, not a boundary it cannot cross.
-At least one SR must hold even when the model ignores the wrapper. Which one?
+4. Effects that need no tool call at all — reachable before B5 exists
+   4.1 Alter the answer returned to the user: fabricate, misstate, assert false authority
+   4.2 Suppress: instruct the agent to omit a fact, or not to mention the document
+   4.3 Influence selection — which skill loads, which tool is chosen       → shares B9 5.2
+   4.4 Plant a durable instruction that fires on a later condition, in this session or a
+       future one
+
+5. Shaping a permitted action rather than requesting a forbidden one
+   5.1 Tenant data placed inside a URL that targets an allowlisted host — the host
+       decision is satisfied, the payload is the exfiltration          → B7 3.1
+   5.2 Data encoded into an argument of a tool the session legitimately holds: a search
+       query, a filename, a commit message
+   5.3 The answer contains a model-composed link or image reference, and the *user's
+       client* fetches it. Exfiltration with no tool call by the agent whatsoever
 ```
 
 **Security requirements**
 
-| ID | Requirement | Kills |
-|---|---|---|
-| SR-B4-1 | _TODO_ | |
+| ID | Requirement | Kills | Kind |
+|---|---|---|---|
+| SR-B4-1 | **Provenance is a property of the bytes, tracked structurally.** Every span in the context carries an origin label assigned at ingestion. The label lives outside the span's own content and can never be set, altered or terminated by that content. | 1.1–1.6, 2.2 | prevent |
+| SR-B4-2 | **Untrusted content is delivered in a channel the model cannot confuse with instruction** — a separate message or structured field, never string-concatenated with system text. Where text framing is unavoidable the sentinel is a per-request nonce. | 2.1, 2.2, 2.4 | prevent |
+| SR-B4-3 | **No security property may depend on the model honouring the marking.** The label determines what the *platform* permits downstream — capability, egress, disclosure — not what the model believes. If the model ignores the wrapper entirely, every control below still holds. | 2.3 | prevent |
+| SR-B4-4 | **Classification is monotonic and sticky.** Derived content inherits the lowest trust of its inputs; model output produced from untrusted input is itself untrusted. No operation upgrades class — not summarisation, not persistence, not re-reading. | 3.1 | prevent |
+| SR-B4-5 | **Persistence preserves provenance.** A document written during a session records the class of what it was derived from, and reading it back does not launder it. | 3.2, 3.3 | prevent |
+| SR-B4-6 | **Compaction preserves labels.** A summarised region carries the union of the labels of its sources; a compaction step that cannot preserve a label must drop the content rather than relabel it. | 3.4 | prevent |
+| SR-B4-7 | **Tool output is untrusted by default**, including output from installed MCP servers and from first-party tools. A result is never instruction. | 1.3 | prevent |
+| SR-B4-8 | **Metadata is ingested through the same labelled path as bodies.** Headers, titles, filenames, redirect targets and error text have no short-string exemption. | 1.4, 1.5 | prevent |
+| SR-B4-9 | **Answers disclose their sources and their classes.** The agent may not conceal that it consulted a source, and an answer derived from untrusted content is marked as such to the user. | 4.1, 4.2 | observe |
+| SR-B4-10 | **Untrusted content cannot influence selection.** Which skill loads and which tool is chosen is not a function of untrusted text — the precedence rule of SR-B9-4 and SR-B9-15 governs, and untrusted spans are excluded from the selection input. | 4.3 | prevent |
+| SR-B4-11 | **Untrusted content cannot create a durable instruction.** Nothing read during a session persists into a later session as instruction; any carried state is data-class on re-entry. | 4.4 | prevent |
+| SR-B4-12 | **Allowlisting is a host decision, never a payload decision.** An outbound request carrying tenant-derived content is denied even when the destination is allowlisted (shares `SR-B7-2`). | 5.1, 5.2 | constrain |
+| SR-B4-13 | **Model-composed URLs are not auto-fetched by the client.** Links and image references in rendered output are neutralised so that no client-initiated request results from text the model wrote. | 5.3 | prevent |
+| SR-B4-14 | **Every ingestion is logged with origin and class**, and any attempt to write a label from within content is a high-signal event. | — | observe |
+
+**Residual (4.1) — influence on the answer.** If untrusted content is in the context at all, it can
+shape what the agent says. That is not preventable without removing the product's function: the whole
+point is that the agent reads the org's documents. The position taken here is that influence over
+*words* is tolerated while influence over *authority* is not — SR-B4-3 ensures no privileged action
+follows from content, and SR-B4-9 makes the derivation visible to the reader. Accepted.
+
+**Residual (3.x) — label fidelity through the model.** SR-B4-4 and SR-B4-6 are enforced at the
+platform's assembly and persistence steps, where spans are machine-tracked. They cannot cover a
+transformation that happens *inside* a single model response — if the model restates poisoned content
+mid-answer, the restatement is inside an already-labelled span and inherits its label, which is
+correct; but the platform cannot distinguish its parts. Mitigated by SR-B4-4's lowest-trust rule
+making the coarse answer the safe one. Accepted.
+
+**Handoffs.**
+
+- 5.1 and 5.2 are enforced at B7 (`SR-B7-1`, `SR-B7-2`). B4 states that the *payload*, not just the
+  destination, determines the decision.
+- 1.3's artifact is B6's; 1.6's artifact is B9's. B4 owns only what happens at ingestion.
+- Anything the content persuades the agent to *do* becomes a tool call and is mediated at B5.
+- 4.3 shares enforcement with B9's selection-precedence rows.
+
+**Note on the pairing with B9.** `SR-B9-7` declared the classification rule — provenance, never
+content inspection. `SR-B4-1` through `SR-B4-6` are where that rule is actually implemented and kept
+true over time. The two boundaries were drafted together because B9 can state the obligation and only
+B4 can discharge it.
 
 ---
 
@@ -544,7 +632,6 @@ Owned, scoped, and deliberately left empty rather than filled with placeholder p
 | Boundary | Assumption | Owner | Note |
 |---|---|---|---|
 | B3 — User → Agent | A8.1, A8.2 | joint | Privilege escalation through delegation; drafted after B4/B9 so the context-channel work informs it |
-| B4 — Agent ↔ untrusted content | A8.6 | DB | The novel half; no industry template to copy |
 | B5 — Agent → Tools | A8.2, A8.4 | joint | The capability boundary; absorbs leaves handed off from B2 (3.1), B6 (4.1), B7 (1.1) |
 
 
@@ -562,7 +649,13 @@ doing threat modelling before code is mostly in this section.
    content the agent loads as a skill is instructions. Both are reasonable; together they mean the
    product's safety depends entirely on the *classification step* that decides which bucket a given
    piece of text lands in. No assumption in §8 covers that step. B9 must test it.
-3. **A8.5 is unenforceable as stated.** "Behaves the same after installation as at review time" cannot
+3. **A8.6 is false as stated, not merely optimistic.** Found at B4. "Content the agent reads is
+   data" describes a property the system cannot have: the model has no type system, and marking a
+   span as data is a convention it may honour rather than a boundary it cannot cross. The defensible
+   form is *"content the agent reads is data **to the platform** — it carries no authority, and no
+   privileged action is taken because the content asked for it,"* which relocates enforcement from
+   the model's compliance to the surrounding machinery. Narrow it in the spec.
+4. **A8.5 is unenforceable as stated.** "Behaves the same after installation as at review time" cannot
    be verified for a remote service whose behaviour may be conditioned on the caller (B6, leaf 2.3).
    The honest form is "*the artifact* is the same," which is a digest-pinning claim. The assumption
    should be narrowed in the spec rather than defended in the code.
@@ -582,6 +675,7 @@ Marked when done.
 | B7 | ⬜ | ✅ 5.1 | ✅ 5.1 | ✅ 1.x, 2.x, 3.x | ⬜ | ✅ 4.x |
 | B8 | ⬜ | ✅ 1.x, 2.x | ✅ 5.x | ⬜ | ✅ 3.2 | ✅ 1.2 |
 | B9 | ✅ 2.2, 5.3 | ✅ 1.x, 3.x | ✅ 2.2, 5.1 | ⬜ | ⚠️ 2.3 | ✅ 4.1 |
+| B4 | ✅ 2.2, 1.5 | ✅ 2.x, 3.x | ✅ 4.2, 3.4 | ✅ 5.x | ⬜ | ✅ 4.x |
 
 ⬜ = not yet checked, not "no threats exist." ⚠️ = checked, thin by design.
 Denial of service is consistently thin across this model: availability is out of scope by declaration
@@ -592,7 +686,7 @@ changes an authorisation outcome — which is exactly SR-B8-4, fail-closed.
 
 ## 7. Open
 
-- [ ] B3, B4, B5 trees and requirements (§4)
+- [ ] B3 and B5 trees and requirements (§4)
 - [ ] Spec PR: add A8.10, narrow A8.5 (§5.1, §5.3)
 - [ ] Complete the STRIDE pass for the drafted boundaries (§6)
 - [ ] `coverage/` entry for B1's declared non-coverage (SR-B1-7)
