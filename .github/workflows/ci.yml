@@ -21,11 +21,9 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
-          # No third-party deps yet, so there is no go.sum to key a cache on.
-          # Re-enable caching when the first dependency is added (by a human —
-          # go.mod is a hardened zone).
-          cache: false
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: app/go.sum
 
       - name: go vet
         working-directory: app
