@@ -32,6 +32,9 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 | M4b Marketplace (Skills) | B9 | ⬜ not started |
 | M6 Publish & Program | — | ⬜ not started |
 
+Detail lives in [`threat-models/`](threat-models/) — the v0 baseline plus one diff per module, each
+committed before the feature code it covers.
+
 ## Trust boundaries
 
 Every finding names the boundary it crosses.
