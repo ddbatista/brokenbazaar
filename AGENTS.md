@@ -26,9 +26,36 @@ feature PR.
 - `.claude/skills/` and **any `SKILL.md` anywhere in this repo**
 - `SECURITY.md`, `LICENSE`
 - Any `ANSWER-KEY.md`
+- **`AGENTS.md` and `CLAUDE.md` — these rules themselves.** You may propose changes to your own
+  rules in a PR description or an issue. You may not write them.
 
 If a task appears to require a change in a hardened zone, **stop and say so**. Do not work around it,
 do not stage an equivalent change elsewhere, and do not disable the check.
+
+### The rules are in the list, and were not at first
+
+This file originally listed seven zones and omitted itself. That omission permitted a fully
+compliant sequence: edit `AGENTS.md` to remove `.github/` from the list, then edit the CI workflow,
+then land a change that breaks a control into a green build. No rule is broken at any step, because
+the rules were changed first and the rules allowed that.
+
+The class matters more than the instance. Most access-control defects let a party do one forbidden
+thing; this one lets a party **redefine what forbidden means**, after which every later action is
+legitimate and the audit trail shows compliance. **The cheapest attack on a control is not bypassing
+it, it is amending it.**
+
+This repo's own threat model had already derived the rule three times from three unrelated
+directions — `SR-B8-2`, `SR-B9-10`, `SR-B3-7` reduce to one line: *authority is delegable; the
+authority to change the delegation is not.* B8 exists as a boundary for exactly this reason, and
+finding 06 is a tenant admin weakening the gate by editing policy instead of attacking it. This was
+the fourth rediscovery, and the first one found in the project's governance rather than in the
+product it describes.
+
+It was found because an agent attempted the edit and its own runtime — not this file — refused: that
+runtime classifies agent-instruction files as protected and requires human approval. The write was
+blocked by someone else's control while this policy stayed silent. A lab whose rules are load-bearing
+on the strictness of whichever tool happens to be reading them does not have rules. Recorded here
+rather than quietly corrected, per the last house rule.
 
 ### The test that defines the list
 
