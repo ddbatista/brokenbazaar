@@ -3,7 +3,8 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 BASE_URL ?= http://localhost:8080
 
-.PHONY: help up down logs ps seed harden test attack detect clean
+.PHONY: help up down logs ps migrate seed harden test attack detect clean
+DATABASE_URL ?= postgres://bazaar:bazaar@127.0.0.1:5432/bazaar?sslmode=disable
 
 help: ## Show this help
 	@echo "BrokenBazaar — deliberately vulnerable. Localhost only."
@@ -41,8 +42,11 @@ logs: ## Tail all logs
 ps: ## Show stack status
 	$(COMPOSE) ps
 
+migrate: ## Apply SQL schema migrations against the stack's Postgres  (M1)
+	cd app && DATABASE_URL=$(DATABASE_URL) go run ./cmd/migrate
+
 seed: ## Seed orgs, users and documents  (M1)
-	@echo "  not yet implemented — arrives with M1 (Tenancy & Identity)"
+	cd app && DATABASE_URL=$(DATABASE_URL) go run ./cmd/seed
 
 test: ## Run unit + policy tests  (M1+)
 	@echo "  not yet implemented — arrives with M1"
