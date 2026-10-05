@@ -44,16 +44,41 @@ Two things in it worth reading even if you never run this code:
 | Module | Boundary | Status |
 |---|---|---|
 | M0 Foundation | — | ✅ complete |
-| M1 Tenancy & Identity | B1, B2 | ⬜ not started |
+| M1 Tenancy & Identity | B1, B2 | 🟡 in progress |
 | M2 Agent & Tool Gateway | B3, B4, B5 | ⬜ not started |
 | M3 Delegation & Confused Deputy | B3, B5, B8 | ⬜ not started |
 | M4a Marketplace (MCP) | B6 | ⬜ not started |
 | M4b Marketplace (Skills) | B9 | ⬜ not started |
 | M6 Publish & Program | — | ⬜ not started |
 
-**Next: M1 — Tenancy & Identity.** Its requirements are already written (`SR-B2-1` … `SR-B2-8`), and
-its two exploits are pre-assigned to named leaves: `attacks/01-cross-tenant-read` → B2 leaf 2.3,
+**In progress: M1 — Tenancy & Identity.** Its requirements were written in M0 (`SR-B1-1` … `SR-B2-8`),
+and its two exploits are pre-assigned to named leaves: `attacks/01-cross-tenant-read` → B2 leaf 2.3,
 `attacks/02-jwt-org-claim` → B2 leaf 1.3.
+
+[`threat-models/m1-tenancy.md`](threat-models/m1-tenancy.md) landed first, before any M1 product
+code, which is the same ordering M0 used and the same reason. It is not a second threat model — it is
+a **diff**. The baseline models the product as specified; a module diff records what the baseline
+could not know, because at M0 there was no implementation to know it about: which leaves this module
+makes reachable *with a route and a SQL statement as the address*, the disposition of every B1/B2
+requirement (shipped, flag-gated, deliberately violated, or deferred with a destination), and the new
+leaves the implementation itself invents.
+
+The sharpest of those (`M1-N2`) **falsifies a requirement from the baseline.** `SR-B2-1` claims no
+code path can obtain a database handle without an org context; that is false as written the moment a
+seed exists, since seeding writes to every tenant before any token does and outside the store
+entirely. Generalised: *an invariant asserted over "all code paths" is routinely false for the paths
+that run before the system is up* — bootstrap, migration, restore, break-glass. The baseline is not
+retroactively edited to hide this; it is an artifact with a date on it, and the correction lands in
+`v1`.
+
+| Task | | |
+|---|---|---|
+| T1 threat-model diff | B1, B2 | ✅ |
+| T2–T5 build (schema, seed, store, auth, handlers — two planted findings) | | ⬜ |
+| T6 exploits | | ⬜ |
+| T7 controls behind `HARDENED` + two-mode regression | | ⬜ |
+| T8 detection | | ⬜ |
+| T9 writeup, answer keys, coverage | | ⬜ |
 
 ## Trust boundaries
 
