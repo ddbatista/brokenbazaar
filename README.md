@@ -22,18 +22,18 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 
 ## Status
 
-| Module | Boundary | Status |
-|---|---|---|
-| M0 Foundation | — | ✅ complete |
-| M1 Tenancy & Identity | B1, B2 | 🟡 in progress |
-| M2 Agent & Tool Gateway | B3, B4, B5 | ⬜ not started |
-| M3 Delegation & Confused Deputy | B3, B5, B8 | ⬜ not started |
-| M4a Marketplace (MCP) | B6 | ⬜ not started |
-| M4b Marketplace (Skills) | B9 | ⬜ not started |
-| M6 Publish & Program | — | ⬜ not started |
+| Module | Boundary | Threat model | Status |
+|---|---|---|---|
+| M0 Foundation | all | [`v0-baseline.md`](threat-models/v0-baseline.md) | ✅ complete |
+| M1 Tenancy & Identity | B1, B2 | [`m1-tenancy.md`](threat-models/m1-tenancy.md) | 🟡 in progress |
+| M2 Agent & Tool Gateway | B3, B4, B5 | — | ⬜ not started |
+| M3 Delegation & Confused Deputy | B3, B5, B8 | — | ⬜ not started |
+| M4a Marketplace (MCP) | B6 | — | ⬜ not started |
+| M4b Marketplace (Skills) | B9 | — | ⬜ not started |
+| M6 Publish & Program | — | — | ⬜ not started |
 
-Detail lives in [`threat-models/`](threat-models/) — the v0 baseline plus one diff per module, each
-committed before the feature code it covers.
+Each threat model is committed **before** the feature code it covers. M0's is the baseline for all
+nine boundaries; every later module adds a diff against it rather than a new document.
 
 ## Trust boundaries
 
