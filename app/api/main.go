@@ -120,14 +120,19 @@ func main() {
 	jwtSecret := loadJWTSecret(hardened())
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthzHandler)
-	// SR-B1-1 (deny-by-default route registration: every route declares
-	// auth: none|token, an unset field is a startup panic) lands in T5, when
+	handlers := &docHandlers{admin: admin, pool: pool, hardened: hardened()}
+	// SR-B1-1 (deny-by-default route registration) lands here in T5, now that
 	// the token-protected document routes (D4) exist and there is something to
-	// protect. T4 adds one route that is unauthenticated by design
-	// (D4: POST /auth/token, "none by design"), so it registers directly on
-	// the bare mux here alongside /healthz.
-	mux.HandleFunc("/auth/token", authTokenHandler(admin, jwtSecret, hardened()))
+	// protect. The two modes register differently on purpose: hardened mode
+	// routes through a declaration table that panics at startup on any route
+	// missing an explicit auth: none|token (registerHardened); vulnerable mode
+	// registers directly on the bare mux, the T4 pattern, with no table and no
+	// such panic. /healthz and /auth/token keep their T4 behaviour in both.
+	if hardened() {
+		registerHardened(mux, handlers, admin, jwtSecret)
+	} else {
+		registerVulnerable(mux, handlers, admin, jwtSecret)
+	}
 
 	srv := &http.Server{
 		Addr:              listenAddr,
