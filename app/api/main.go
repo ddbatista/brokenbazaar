@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,9 +16,18 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
 const listenAddr = ":8080"
+
+// jwtSecretEnv names the signing-key variable; devJWTSecret is the committed
+// development fallback used only in vulnerable mode (M1-N1).
+const (
+	jwtSecretEnv = "JWT_SECRET"
+	devJWTSecret = "dev-secret"
+)
 
 type healthResponse struct {
 	Status   string `json:"status"`
@@ -28,6 +38,35 @@ type healthResponse struct {
 
 func hardened() bool {
 	return os.Getenv("HARDENED") == "true"
+}
+
+// loadJWTSecret returns the HMAC signing key for POST /auth/token.
+//
+// hardened=true (SR-B1-3): the key must come from the environment. If
+// JWT_SECRET is unset the process refuses to start -- a startup failure
+// naming the variable, not a request-time 401. A missing signing key is a
+// misconfiguration the operator must fix before serving anything, not an
+// error to discover one token at a time.
+//
+// hardened=false: the key falls back to the committed devJWTSecret (M1-N1 --
+// the weak-key half of B1 1.2). Crucially the fallback is NOT silent
+// (SR-M1-1: "loud or absent, never quiet"): it logs at WARN naming the
+// variable and the consequence. Only the *strength* of the secret is
+// flag-gated; the logging is not, because the leaf M1-N1 adds over the
+// baseline is specifically that a real operator who typos JWT_SECRET gets a
+// working stack signed with a public key and no signal that it happened.
+func loadJWTSecret(hardened bool) []byte {
+	secret := os.Getenv(jwtSecretEnv)
+	if secret != "" {
+		return []byte(secret)
+	}
+	if hardened {
+		log.Fatalf("api: %s is not set; refusing to start in hardened mode (SR-B1-3)", jwtSecretEnv)
+	}
+	log.Printf("WARN: %s is not set; falling back to the committed %q secret -- "+
+		"tokens are signed with a key anyone with the source can read and are therefore forgeable (M1-N1, SR-M1-1)",
+		jwtSecretEnv, devJWTSecret)
+	return []byte(devJWTSecret)
 }
 
 // healthcheck is used by the container healthcheck so the image needs no curl.
@@ -64,8 +103,31 @@ func main() {
 		os.Exit(healthcheck())
 	}
 
+	// The serving path needs the database; the -healthcheck path above does
+	// not, which is why the pool is opened only here.
+	ctx := context.Background()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("api: DATABASE_URL is not set")
+	}
+	pool, err := store.Open(ctx, dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pool.Close()
+
+	admin := store.NewAdminStore(pool)
+	jwtSecret := loadJWTSecret(hardened())
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthzHandler)
+	// SR-B1-1 (deny-by-default route registration: every route declares
+	// auth: none|token, an unset field is a startup panic) lands in T5, when
+	// the token-protected document routes (D4) exist and there is something to
+	// protect. T4 adds one route that is unauthenticated by design
+	// (D4: POST /auth/token, "none by design"), so it registers directly on
+	// the bare mux here alongside /healthz.
+	mux.HandleFunc("/auth/token", authTokenHandler(admin, jwtSecret, hardened()))
 
 	srv := &http.Server{
 		Addr:              listenAddr,
