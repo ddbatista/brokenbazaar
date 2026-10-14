@@ -1,0 +1,7 @@
+{
+  "finding": "01-cross-tenant-read",
+  "boundary": "B2",
+  "frameworks": ["A01:2021"],
+  "vulnerable": { "exit_code": 0, "stdout_contains": "Acme Corp — confidential Q3 plan" },
+  "hardened":   { "exit_code": 1, "stdout_contains": "CONTROL HOLDS" }
+}

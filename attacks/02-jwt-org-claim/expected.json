@@ -1,0 +1,7 @@
+{
+  "finding": "02-jwt-org-claim",
+  "boundary": "B1, B2",
+  "frameworks": ["A01:2021", "A07:2021"],
+  "vulnerable": { "exit_code": 0, "stdout_contains": "believed the forged org_id claim" },
+  "hardened":   { "exit_code": 1, "stdout_contains": "CONTROL HOLDS" }
+}
