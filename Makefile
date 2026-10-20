@@ -48,12 +48,22 @@ migrate: ## Apply SQL schema migrations against the stack's Postgres  (M1)
 seed: ## Seed orgs, users and documents  (M1)
 	cd app && DATABASE_URL=$(DATABASE_URL) go run ./cmd/seed
 
-test: ## Run unit + policy tests  (M1+)
-	@echo "  not yet implemented — arrives with M1"
+test: ## Run the regression suite (attack harness, both modes)
+	@echo "  attack harness (both modes) -- go unit tests arrive with M2"
+	$(MAKE) --no-print-directory attack
 
-attack: ## Run the full attack suite in both modes  (M1+)
-	@echo "  not yet implemented — arrives with M1"
-	@echo "  contract: attacks/NN-name/exploit.py --base-url $(BASE_URL)"
+attack: ## Run the full attack suite in both modes
+	@echo "== VULNERABLE mode: every exploit must SUCCEED =="
+	HARDENED=false $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+	cd attacks && ./run.py --mode vulnerable --base-url $(BASE_URL)
+	@echo ""
+	@echo "== HARDENED mode: every exploit must be BLOCKED =="
+	HARDENED=true $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+	cd attacks && ./run.py --mode hardened --base-url $(BASE_URL)
+	@echo ""
+	@echo "attack suite: both modes behaved as their mode demands"
 
 detect: ## Replay PoCs and measure detect vs. miss  (M1+)
 	@echo "  not yet implemented — arrives with M1"
