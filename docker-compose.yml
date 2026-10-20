@@ -29,6 +29,7 @@ services:
     container_name: bb-api
     environment:
       HARDENED: "${HARDENED:-false}"
+      JWT_SECRET: "${JWT_SECRET:-}"
       DATABASE_URL: "postgres://bazaar:bazaar@db:5432/bazaar?sslmode=disable"
     ports:
       - "127.0.0.1:8080:8080"

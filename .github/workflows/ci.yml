@@ -60,7 +60,7 @@ jobs:
 
       - name: hardened mode also starts
         run: |
-          make harden
+          JWT_SECRET=ci-only-not-a-secret make harden
           curl -fsS http://localhost:8080/healthz | grep -q '"hardened":true'
 
       - name: logs on failure
@@ -72,13 +72,34 @@ jobs:
         run: make down
 
   attacks:
-    name: attack suite (both modes)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      name: attack suite (both modes)
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
 
-      - name: placeholder
-        run: |
-          echo "Attack suite arrives with M1."
-          echo "Contract: every attacks/NN-*/exploit.py exits 0 vulnerable, non-zero hardened."
-          echo "This job must turn red the day a control stops working."
+        - uses: actions/setup-go@v5
+          with:
+            go-version: "1.25"
+            cache: true
+            cache-dependency-path: app/go.sum
+
+        - name: vulnerable mode -- every exploit must SUCCEED
+          run: |
+            make up
+            make migrate
+            make seed
+            cd attacks && ./run.py --mode vulnerable --base-url http://localhost:8080
+
+        - name: hardened mode -- every exploit must be BLOCKED
+          run: |
+            JWT_SECRET=ci-only-not-a-secret make harden
+            cd attacks && ./run.py --mode hardened --base-url http://localhost:8080
+
+        - name: logs on failure
+          if: failure()
+          run: docker compose logs --tail=100
+
+        - name: make down
+          if: always()
+          run: make down
+          
