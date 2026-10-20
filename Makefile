@@ -65,8 +65,18 @@ attack: ## Run the full attack suite in both modes
 	@echo ""
 	@echo "attack suite: both modes behaved as their mode demands"
 
-detect: ## Replay PoCs and measure detect vs. miss  (M1+)
-	@echo "  not yet implemented — arrives with M1"
+detect: ## Replay PoCs and measure detect vs. miss (both modes)
+	@echo "== VULNERABLE mode: detection replay =="
+	HARDENED=false $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+	python3 detections/replay.py --base-url $(BASE_URL)
+	@echo ""
+	@echo "== HARDENED mode: detection replay (needs JWT_SECRET) =="
+	JWT_SECRET=$(JWT_SECRET) HARDENED=true $(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory wait
+	python3 detections/replay.py --hardened --base-url $(BASE_URL)
+	@echo ""
+	@echo "detection replay: both modes matched expectations"
 
 clean: down ## Stop everything and prune build cache
 	docker builder prune -f
