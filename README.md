@@ -25,7 +25,7 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 | Module | Boundary | Threat model | Status |
 |---|---|---|---|
 | M0 Foundation | all | [`v0-baseline.md`](threat-models/v0-baseline.md) | ✅ complete |
-| M1 Tenancy & Identity | B1, B2 | [`m1-tenancy.md`](threat-models/m1-tenancy.md) | 🟡 in progress |
+| M1 Tenancy & Identity | B1, B2 | [`m1-tenancy.md`](threat-models/m1-tenancy.md) | ✅ complete — [01](attacks/01-cross-tenant-read/) · [02](attacks/02-jwt-org-claim/) |
 | M2 Agent & Tool Gateway | B3, B4, B5 | — | ⬜ not started |
 | M3 Delegation & Confused Deputy | B3, B5, B8 | — | ⬜ not started |
 | M4a Marketplace (MCP) | B6 | — | ⬜ not started |
@@ -68,6 +68,13 @@ Every defense is behind a `HARDENED` flag, so the same PoC can be shown working,
 ```bash
 make up          # vulnerable  — attacks exit 0
 make harden      # hardened    — the same attacks exit non-zero
+```
+
+The lifecycle is runnable end to end, asserted, in both modes:
+
+```bash
+JWT_SECRET=<any-value> make attack   # both PoCs × both modes, asserted (regression suite)
+JWT_SECRET=<any-value> make detect   # replay + probe sweep; measured detect-vs-miss matrix
 ```
 
 ## Layout
