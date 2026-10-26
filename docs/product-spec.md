@@ -193,15 +193,18 @@ GET    /healthz
 
 The assumptions this product is built on. They are written down so the threat model has something concrete to test — some will hold, some will not.
 
+Revised **once**, at M1, by the derivations that tested them (M0's baseline and M1's diff); each revision carries its provenance inline. A spec amended continuously is a spec nobody re-reads.
+
 1. A user's membership role reflects what they are allowed to do in that org.
 2. An agent session acts within the authority of the user it was created for.
-3. Documents belong to exactly one org and are reachable only within it.
+3. (a) A document belongs to exactly one org — a **storage invariant**, enforced by the schema. (b) A document is reachable only within its org — an **application property**, enforced by the store layer. *(Split at M1: one sentence carried two claims of very different strength — see `threat-models/m1-tenancy.md` §5.)*
 4. A tool does what its description says it does.
-5. A catalog listing behaves the same after installation as it did at review time.
-6. Content the agent reads — documents, fetched pages, tool output — is *data*.
+5. The *artifact* an org installed is the artifact it reviewed — pinned by content digest; a changed artifact is a new version requiring explicit adoption. *(Narrowed at M0: "behaves the same after installation" is unverifiable for a remote service whose behaviour may be conditioned on the caller — see `threat-models/v0-baseline.md` §5.)*
+6. Content the agent reads is data **to the platform**: it carries no authority, and no privileged action is taken because the content asked for it. *(Narrowed at M0: the model has no type system, so "marked as data" is a convention it may honour, not a boundary it cannot cross — see `threat-models/v0-baseline.md` §5.)*
 7. Content the agent loads as a skill is *instructions*, and following it is correct behaviour.
 8. Configuration and policy are changed only by people entitled to change them.
 9. The audit record is a faithful account of what the agent did.
+10. The application's runtime identity and internal network position are reachable only by the application itself. *(Added at M0: §8 was silent about what the application itself holds — precisely where SSRF-to-metadata lives — see `threat-models/v0-baseline.md` §5.)*
 
 ---
 
