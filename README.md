@@ -26,7 +26,7 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 |---|---|---|---|
 | M0 Foundation | all | [`v0-baseline.md`](threat-models/v0-baseline.md) | ✅ complete |
 | M1 Tenancy & Identity | B1, B2 | [`m1-tenancy.md`](threat-models/m1-tenancy.md) | ✅ complete — [01](attacks/01-cross-tenant-read/) · [02](attacks/02-jwt-org-claim/) |
-| M2 Agent & Tool Gateway | B3, B4, B5 | — | ⬜ not started |
+| M2 Agent & Tool Gateway | B3, B4, B5 | [`m2-agent-gateway.md`](threat-models/m2-agent-gateway.md) | 🚧 in progress — threat model landed, build next |
 | M3 Delegation & Confused Deputy | B3, B5, B8 | — | ⬜ not started |
 | M4a Marketplace (MCP) | B6 | — | ⬜ not started |
 | M4b Marketplace (Skills) | B9 | — | ⬜ not started |
