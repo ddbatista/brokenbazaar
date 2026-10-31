@@ -1,6 +1,7 @@
 # build output
 /out/
 app/api/api
+app/.bin/
 *.exe
 
 # local env — never commit credentials, even fake ones

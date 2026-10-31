@@ -48,8 +48,39 @@ migrate: ## Apply SQL schema migrations against the stack's Postgres  (M1)
 seed: ## Seed orgs, users and documents  (M1)
 	cd app && DATABASE_URL=$(DATABASE_URL) go run ./cmd/seed
 
-test: ## Run the regression suite (attack harness, both modes)
-	@echo "  attack harness (both modes) -- go unit tests arrive with M2"
+agent: ## Run one agent session: make agent SESSION=<id> ORG=<id> [MODE=vulnerable]  (M2)
+	@test -n "$(SESSION)" || { echo "usage: make agent SESSION=<id> ORG=<id> [MODE=vulnerable]"; exit 2; }
+	@test -n "$(ORG)" || { echo "usage: make agent SESSION=<id> ORG=<id> [MODE=vulnerable]"; exit 2; }
+	cd app && DATABASE_URL=$(DATABASE_URL) go run $(if $(filter vulnerable,$(MODE)),-tags vulnerable,) ./cmd/agent -session $(SESSION) -org $(ORG)
+
+verify-agent-builds: ## Assert the hardened agent binary contains no in-process tool code  (M2, D5)
+	@mkdir -p app/.bin
+	@cd app && go build -o .bin/agent-hardened ./cmd/agent
+	@cd app && go build -tags vulnerable -o .bin/agent-vulnerable ./cmd/agent
+	@cd app && for sym in NaiveExecutor NaiveAssembler; do \
+		n=$$(go tool nm .bin/agent-hardened | grep -c "$$sym" || true); \
+		if [ "$$n" != "0" ]; then \
+			echo "FAIL: hardened binary contains $$sym ($$n symbols) -- D5 requires no in-process tool code"; exit 1; \
+		fi; \
+		v=$$(go tool nm .bin/agent-vulnerable | grep -c "$$sym" || true); \
+		if [ "$$v" = "0" ]; then \
+			echo "FAIL: vulnerable binary is missing $$sym -- the planted bug is not compiled in"; exit 1; \
+		fi; \
+		echo "  ok  $$sym: hardened=0 vulnerable=$$v"; \
+	done
+	@echo "verify-agent-builds: D5 holds -- the hardened artifact has no tool code to route around"
+
+test: ## Run the regression suite (go unit tests both tag sets, then the attack harness)
+	@echo "== go unit tests: hardened build =="
+	cd app && go test ./...
+	@echo ""
+	@echo "== go unit tests: vulnerable build =="
+	@echo "   (the default build never compiles the naive assembler or executor,"
+	@echo "    so a vulnerable-only compile error would hide until T7 without this)"
+	cd app && go test -tags vulnerable ./...
+	@echo ""
+	$(MAKE) --no-print-directory verify-agent-builds
+	@echo ""
 	$(MAKE) --no-print-directory attack
 
 attack: ## Run the full attack suite in both modes
