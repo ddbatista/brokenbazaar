@@ -100,6 +100,26 @@ moved the CI toolchain pin and the Dockerfile base image — three files, none o
 Ask what a new dependency changes about: language floor, toolchain pins, base images, build context,
 cache keys.
 
+### Pinning: strength follows what the artifact does
+
+Not every image in this repo is pinned the same way, and the difference is deliberate.
+
+- **Build images** (`golang:1.25-alpine`) are pinned by **tag**. Their output is verified
+  downstream by `go.sum` against the `sum.golang.org` transparency log, so swapping the image
+  cannot introduce an unverified dependency — the hashes still have to match.
+- **Runtime base images** (`gcr.io/distroless/static-debian12:nonroot`) are pinned by **tag**.
+  They ship no code we execute, though a swapped base is a swapped root filesystem beneath our
+  binary. This is the weakest link in the policy and is accepted knowingly.
+- **Binaries that make security decisions at runtime** (`openpolicyagent/opa`) are pinned by
+  **digest**. Nothing downstream verifies them; swap one and the gate's behaviour changes with no
+  signal anywhere.
+
+A digest is an **integrity** control, not a **currency** control. It guarantees the bytes have not
+moved and guarantees nothing about whether the version is still the right one — so digest pins are
+paired with a human re-reading the release list at the moment of recording, never at the moment of
+drafting. Until this repo has an automated update process, pinning everything by digest would
+trade a moving-tag risk for a stale-base risk and look more rigorous while being worse.
+
 **Do not run `go mod tidy` to install.** Tidy reconciles requirements with *imports*; run before the
 code that imports the dependency exists, it removes the dependency and empties `go.sum`.
 
