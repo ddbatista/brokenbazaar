@@ -53,6 +53,10 @@ agent: ## Run one agent session: make agent SESSION=<id> ORG=<id> [MODE=vulnerab
 	@test -n "$(ORG)" || { echo "usage: make agent SESSION=<id> ORG=<id> [MODE=vulnerable]"; exit 2; }
 	cd app && DATABASE_URL=$(DATABASE_URL) go run $(if $(filter vulnerable,$(MODE)),-tags vulnerable,) ./cmd/agent -session $(SESSION) -org $(ORG)
 
+test-gateway: ## Run the Python gateway tool tests (stdlib unittest, no network)  (M2)
+	@echo "== gateway tool tests =="
+	python3 -m unittest discover -s gateway/tools -t gateway
+
 verify-agent-builds: ## Assert the hardened agent binary contains no in-process tool code  (M2, D5)
 	@mkdir -p app/.bin
 	@cd app && go build -o .bin/agent-hardened ./cmd/agent
@@ -78,6 +82,8 @@ test: ## Run the regression suite (go unit tests both tag sets, then the attack 
 	@echo "   (the default build never compiles the naive assembler or executor,"
 	@echo "    so a vulnerable-only compile error would hide until T7 without this)"
 	cd app && go test -tags vulnerable ./...
+	@echo ""
+	$(MAKE) --no-print-directory test-gateway
 	@echo ""
 	$(MAKE) --no-print-directory verify-agent-builds
 	@echo ""

@@ -341,6 +341,51 @@ func (h *docHandlers) delete(w http.ResponseWriter, r *http.Request, claims auth
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// internalReadDocument serves the D5b tool route: the gateway asks the
+// API to execute read_document on its behalf, authenticated by
+// TOOLS_SECRET (see requireServiceSecret). Hardened mode only -- the
+// route is not registered in registerVulnerable, where the agent runs
+// the tool in-process instead (the planted B5 2.1 bypass).
+//
+// The org arrives as an explicit query parameter, supplied by the
+// gateway from its session record, and is bound through store.ForOrg.
+// Two things follow from that and both are deliberate:
+//
+//   - The caller names the org, which looks like the mistake finding 02
+//     is about. It is not: the caller here is the gateway, authenticated
+//     by a service credential, and it is the only component positioned
+//     to know which session is acting. The equivalent user-facing route
+//     resolves the org from membership precisely because a USER's claim
+//     about their own org is attacker-controlled. A component credential
+//     is not a user claim.
+//   - A document id from another tenant resolves to not-found through
+//     the same single WHERE clause every other caller gets (SR-M1-4), so
+//     the gateway cannot use this route to enumerate across orgs even
+//     holding a valid secret.
+//
+// Claims are unused: a service credential authenticates a component, not
+// a person, and there is no user identity on this request to read.
+func (h *docHandlers) internalReadDocument(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+	ctx := r.Context()
+	docID := r.URL.Query().Get("id")
+	orgID := r.URL.Query().Get("org")
+	if docID == "" || orgID == "" {
+		writeJSONError(w, http.StatusBadRequest, "id and org are required")
+		return
+	}
+
+	doc, found, err := store.ForOrg(h.pool, orgID).Get(ctx, docID)
+	if err != nil {
+		internalError(w, err)
+		return
+	}
+	if !found {
+		notFound(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, toDocumentResponse(doc))
+}
+
 // filterByOrg keeps only the documents belonging to orgID. Used by the
 // vulnerable List path (M1-N3) and nowhere else -- the hardened store scopes in
 // SQL, so no Go-side filter exists to forget.

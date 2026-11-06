@@ -29,6 +29,14 @@ const (
 	devJWTSecret = "dev-secret"
 )
 
+// toolsSecretEnv names the service credential shared with the gateway
+// (D5b). There is deliberately NO development fallback, unlike
+// devJWTSecret: that fallback exists to plant M1-N1's weak-key finding,
+// and a committed default here would plant a second one nobody asked
+// for -- the agent could then read the source, present the default, and
+// D5b's entire mediation claim would be false.
+const toolsSecretEnv = "TOOLS_SECRET"
+
 type healthResponse struct {
 	Status   string `json:"status"`
 	Service  string `json:"service"`
@@ -67,6 +75,30 @@ func loadJWTSecret(hardened bool) []byte {
 		"tokens are signed with a key anyone with the source can read and are therefore forgeable (M1-N1, SR-M1-1)",
 		jwtSecretEnv, devJWTSecret)
 	return []byte(devJWTSecret)
+}
+
+// loadToolsSecret returns the service credential the gateway presents on
+// the D5b internal tool routes.
+//
+// Loud or absent, never quiet (SR-B1-3, SR-M1-1): unset in hardened mode
+// is a startup failure naming the variable, not a route that 401s every
+// caller and surfaces three layers up as "the agent could not read the
+// document." The panic itself lives in registerHardened, next to the
+// route declaration that needs it, so the failure message can name the
+// route -- this function just reports what the environment holds.
+//
+// Vulnerable mode has no internal route (the agent reads in-process,
+// which is the planted B5 2.1 bypass), so there is nothing to
+// authenticate and nil is correct rather than a missing-config error.
+func loadToolsSecret(hardened bool) []byte {
+	secret := os.Getenv(toolsSecretEnv)
+	if secret == "" {
+		if hardened {
+			log.Printf("api: %s is not set; the hardened internal tool route cannot be served (SR-B1-3, D5b)", toolsSecretEnv)
+		}
+		return nil
+	}
+	return []byte(secret)
 }
 
 // healthcheck is used by the container healthcheck so the image needs no curl.
@@ -119,7 +151,6 @@ func main() {
 	admin := store.NewAdminStore(pool)
 	jwtSecret := loadJWTSecret(hardened())
 
-	mux := http.NewServeMux()
 	handlers := &docHandlers{admin: admin, pool: pool, hardened: hardened()}
 	// SR-B1-1 (deny-by-default route registration) lands here in T5, now that
 	// the token-protected document routes (D4) exist and there is something to
@@ -128,15 +159,27 @@ func main() {
 	// missing an explicit auth: none|token (registerHardened); vulnerable mode
 	// registers directly on the bare mux, the T4 pattern, with no table and no
 	// such panic. /healthz and /auth/token keep their T4 behaviour in both.
+	//
+	// T4 note: registerHardened now BUILDS and OWNS its mux, returning a
+	// handler whose ServeMux is unreachable. That closes M1's T9 rot
+	// finding -- the panic only ever covered routes already in the table,
+	// so a handler registered straight onto the mux bypassed SR-B1-1
+	// entirely. There is no longer a mux in scope here to register onto.
+	var handler http.Handler
 	if hardened() {
-		registerHardened(mux, handlers, admin, jwtSecret)
+		handler = registerHardened(handlers, admin, jwtSecret, loadToolsSecret(true))
 	} else {
+		// Vulnerable mode keeps the bare mux on purpose: no table, no
+		// auth declaration, no panic-on-missing. That contrast is the
+		// SR-B1-1 lesson, and it is the deliverable.
+		mux := http.NewServeMux()
 		registerVulnerable(mux, handlers, admin, jwtSecret)
+		handler = mux
 	}
 
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

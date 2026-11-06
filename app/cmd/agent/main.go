@@ -70,9 +70,13 @@ func main() {
 	}
 
 	loop := &agent.Loop{
-		Assembler:    agent.NewAssembler(),
-		Model:        &agent.ScriptedModel{},
-		Executor:     agent.NewExecutor(),
+		Assembler: agent.NewAssembler(),
+		Model:     &agent.ScriptedModel{},
+		Executor: agent.NewExecutor(agent.ExecutorConfig{
+			Pool:      pool,
+			OrgID:     *orgID,
+			SessionID: sess.ID,
+		}),
 		Sessions:     store.ForSession(pool, *orgID, sess.ID),
 		SystemPrompt: systemPrompt,
 	}

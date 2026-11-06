@@ -82,7 +82,7 @@ JWT_SECRET=<any-value> make detect   # replay + probe sweep; measured detect-vs-
 | Path | Contents |
 |---|---|
 | `app/` | Go: API, agent loop, store, tools |
-| `gateway/` | Python: judge + policy (ported from [jev-lab](https://github.com/ddbatista/jev-lab)) |
+| `gateway/` | Python: tool mediation + policy. The LLM judge from [jev-lab](https://github.com/ddbatista/jev-lab) is **deferred to M4a** — M2's gate has no ambiguous calls to adjudicate (`threat-models/m2-agent-gateway.md`, D2) |
 | `attacks/` | One dir per finding: `exploit.py`, `README.md`, `expected.json`, `ANSWER-KEY.md` |
 | `defenses/` | Control design docs — *why* this control, not just what |
 | `detections/` | Detection rules + replay harness + coverage report |

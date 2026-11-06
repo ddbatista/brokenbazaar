@@ -20,8 +20,12 @@ import (
 // artifact contains no NaiveExecutor symbol at all -- the check in
 // Makefile's `verify-agent-builds` target asserts exactly that.
 //
-// T5/T6 fill in the POST /gate call. T3 ships the seam and refuses
-// loudly: a stub returning canned results would let the loop appear to
+// The tool implementations this will call already exist, written first
+// per the house rule: gateway/tools/fetch.py (SR-B5-3, SR-B7-1) and
+// gateway/tools/documents.py (D5b). What is missing is the gateway
+// SERVICE that hosts them -- policy, audit pre-record, OPA -- which is
+// T5. Until then this refuses loudly and names the call it would have
+// made: a stub returning canned results would let the loop appear to
 // work against data no tool produced.
 type GatewayExecutor struct {
 	gatewayURL string
@@ -31,7 +35,12 @@ var _ ToolExecutor = (*GatewayExecutor)(nil)
 
 // NewExecutor is the build-tag selected constructor. Both files define
 // it; only one is compiled.
-func NewExecutor() ToolExecutor {
+//
+// The hardened executor deliberately ignores cfg.Pool and cfg.OrgID: it
+// has no business touching the database, and the compiler cannot
+// express "holds this field but must not use it". The residual declared
+// in loop.go covers the same exposure at package level.
+func NewExecutor(_ ExecutorConfig) ToolExecutor {
 	return &GatewayExecutor{gatewayURL: os.Getenv("GATEWAY_URL")}
 }
 

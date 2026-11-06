@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -15,6 +17,27 @@ type Result struct {
 	Tool    string
 	Text    string
 	Summary string
+}
+
+// ExecutorConfig carries what an executor might need to construct
+// itself. Both build-tagged constructors take it; each uses only what
+// its mode legitimately requires.
+//
+// The hardened executor uses NONE of it -- it reads GATEWAY_URL from
+// the environment and holds no database handle, because D5 says the
+// hardened agent has no tool code and a pool is the raw material of
+// one. The vulnerable executor uses Pool and OrgID to read documents
+// in-process, which is the planted bypass (B5 2.1).
+//
+// A shared struct rather than per-mode signatures: the loop wiring in
+// cmd/agent must compile identically under both tags, and the moment
+// the two constructors take different arguments, main.go needs its own
+// build-tagged copy -- which is exactly the duplicated wiring that
+// decision 4 rejected option C for.
+type ExecutorConfig struct {
+	Pool      *pgxpool.Pool
+	OrgID     string
+	SessionID string
 }
 
 // ToolExecutor is the seam D5 is a statement about. The loop holds this
