@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -48,6 +49,23 @@ func NewAssembler() Assembler { return &NaiveAssembler{} }
 // Mode names the build for startup logging. See the hardened file.
 func Mode() string { return "vulnerable" }
 
+// NewAgentAudit opens D4's second writer for this build. The hardened
+// file's version returns nil: over THERE the gateway's JSONL is the
+// whole audit trail, and no hardened binary contains a code path that
+// writes agent.jsonl. Here, the agent is the only writer there is --
+// nothing mediated these calls, so nothing else can record them, and an
+// unrecorded vulnerable mode would be silent (SR-B5-9).
+//
+// The path is AGENT_AUDIT_PATH or audit/agent.jsonl beside the
+// gateway's audit/gateway.jsonl, so one volume mounts both (T6).
+func NewAgentAudit() (*AgentAudit, error) {
+	path := os.Getenv("AGENT_AUDIT_PATH")
+	if path == "" {
+		path = defaultAgentAuditPath
+	}
+	return openAgentAudit(path)
+}
+
 // naiveAllowedTools is leaf B5 3.2: a check that exists and is
 // worthless. §2 describes it as "vulnerable mode's mechanical check,
 // WHERE IT EXISTS AT ALL" -- the tool NAME is allowlisted and the
@@ -59,7 +77,7 @@ var naiveAllowedTools = map[string]bool{
 	"http_fetch":    true,
 }
 
-func (e *NaiveExecutor) Execute(ctx context.Context, a Action) (Result, error) {
+func (e *NaiveExecutor) Execute(ctx context.Context, a Action, _ CallContext) (Result, error) {
 	// B5 2.1, the module's planted bug: the gateway is never consulted.
 	// Not asked and denied -- not asked at all. There is no POST to
 	// /gate anywhere in this file, because "it's internal, so it's
@@ -107,11 +125,16 @@ func (e *NaiveExecutor) readDocument(ctx context.Context, id string) (Result, er
 	// instruction. SR-B4-7 says tool output is untrusted by default, and
 	// the loop labels this span untrusted in BOTH modes -- ingestion
 	// labelling is not the planted bug (T3 D3).
+	//
+	// Route is "unmediated" (T5): no decision was made, and recording
+	// "allow" would claim one was. The loop pairs it with a NULL
+	// decision_id via the schema's CHECK.
 	text := doc.Title + "\n\n" + doc.Body
 	return Result{
 		Tool:    "read_document",
 		Text:    text,
 		Summary: fmt.Sprintf("%s (%d bytes)", doc.Title, len(text)),
+		Route:   "unmediated",
 	}, nil
 }
 
@@ -163,5 +186,6 @@ func (e *NaiveExecutor) httpFetch(ctx context.Context, rawURL string) (Result, e
 		Tool:    "http_fetch",
 		Text:    text,
 		Summary: fmt.Sprintf("%s -> %d (%d bytes)", final, resp.StatusCode, len(text)),
+		Route:   "unmediated",
 	}, nil
 }

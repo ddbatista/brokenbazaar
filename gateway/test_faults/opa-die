@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fault shim: "the OPA process died."
+#
+# 137 is SIGKILL's exit code -- an OOM kill or a container stop, the
+# commonest way a sidecar dependency disappears in production.
+#
+# Injected via OPA_BINARY. The gate must answer DENY (a fail-closed
+# decision, reason opa_unavailable, recorded internally), never allow and
+# never an unhandled exception a caller could catch and proceed past.
+exit 137

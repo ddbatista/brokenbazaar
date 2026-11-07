@@ -94,6 +94,23 @@ says so rather than implying a check that was not run. Worth confirming at apply
 `docker run --rm openpolicyagent/opa@sha256:895872de... version`. Not a reason to reject either
 release, and exactly the sort of thing a dependency gate exists to notice and write down.
 
+> **CONFIRMED 2026-11-07, during T5.** The check this entry asked for was run against the pinned
+> digest:
+>
+> ```
+> Version: 1.22.0
+> Build Commit: d4c8d0c8812290c3e3715ca4cf958f75283f6ec4-dirty
+> Build Timestamp: 2026-10-29T14:52:06Z
+> ```
+>
+> **1.22.0 is dirty too** — a *different* commit, same `-dirty` suffix, so this is the vendor's
+> standing release practice rather than a one-off slip on 1.21.4. Still not a reason to reject:
+> the digest pins the bytes we reviewed, and reproducibility of the vendor's build is a property we
+> never had and never claimed. What changes is only that the repo now knows it, on the version it
+> actually ships, instead of carrying an open question into M3. The gate asked a question at draft
+> time and got its answer at use time, which is the freshness-window rule working in the direction
+> it was written for.
+
 ### 2. `python:3.13-slim` — base for the gateway and the fixtures
 
 **Digest:** `sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045efa2ac1e9c5c3b2`

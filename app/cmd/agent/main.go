@@ -69,6 +69,16 @@ func main() {
 		log.Fatalf("agent: no session %s in org %s", *sessionID, *orgID)
 	}
 
+	// D4's second writer, build-tag selected: nil in hardened builds
+	// (the gateway's JSONL is the whole audit trail there), a real
+	// append-only writer in vulnerable builds, where the agent is the
+	// only recorder there is. An unwritable audit destination is a
+	// startup failure, not a mid-run surprise.
+	audit, err := agent.NewAgentAudit()
+	if err != nil {
+		log.Fatalf("agent: %v", err)
+	}
+
 	loop := &agent.Loop{
 		Assembler: agent.NewAssembler(),
 		Model:     &agent.ScriptedModel{},
@@ -79,6 +89,11 @@ func main() {
 		}),
 		Sessions:     store.ForSession(pool, *orgID, sess.ID),
 		SystemPrompt: systemPrompt,
+		// T5: the platform context every dispatch and audit record
+		// carries -- set once from the session row, never from anything
+		// the model produced (M2-N3).
+		Session: agent.SessionInfo{ID: sess.ID, OrgID: sess.OrgID, ActingFor: sess.ActingFor},
+		Audit:   audit,
 	}
 
 	fmt.Printf("agent: session=%s org=%s acting_for=%s build=%s\n",

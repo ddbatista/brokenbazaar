@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 BASE_URL ?= http://localhost:8080
 
-.PHONY: help up down logs ps migrate seed harden test attack detect clean
+.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy
 DATABASE_URL ?= postgres://bazaar:bazaar@127.0.0.1:5432/bazaar?sslmode=disable
 
 help: ## Show this help
@@ -53,9 +53,22 @@ agent: ## Run one agent session: make agent SESSION=<id> ORG=<id> [MODE=vulnerab
 	@test -n "$(ORG)" || { echo "usage: make agent SESSION=<id> ORG=<id> [MODE=vulnerable]"; exit 2; }
 	cd app && DATABASE_URL=$(DATABASE_URL) go run $(if $(filter vulnerable,$(MODE)),-tags vulnerable,) ./cmd/agent -session $(SESSION) -org $(ORG)
 
-test-gateway: ## Run the Python gateway tool tests (stdlib unittest, no network)  (M2)
+test-gateway: ## Run the Python gateway tests (stdlib unittest, no network)  (M2)
 	@echo "== gateway tool tests =="
 	python3 -m unittest discover -s gateway/tools -t gateway
+	@echo ""
+	@echo "== gateway service tests: policy, audit ordering, faults, redaction =="
+	@echo "   (policy tests SKIP -- loudly -- until gateway/policy/ is applied;"
+	@echo "    the fault-injection tests never skip, because a dead engine needs"
+	@echo "    no policy of its own)"
+	python3 -m unittest discover -s gateway -t gateway -p 'test_*.py'
+
+test-policy: ## Run `opa test` against the SAME digest the gateway ships  (M2, T0)
+	@test -d gateway/policy && test -f gateway/policy/policy.rego || { \
+		echo "gateway/policy/ is not applied yet -- see PROPOSED-POLICY.md"; exit 2; }
+	docker run --rm -v "$(PWD)/gateway/policy:/policy:ro" \
+		openpolicyagent/opa@sha256:895872de1e8dc5b82e04f9410d2d1ada2f72d28fdcdba0e8789d91cfc27ec0d0 \
+		test /policy
 
 verify-agent-builds: ## Assert the hardened agent binary contains no in-process tool code  (M2, D5)
 	@mkdir -p app/.bin

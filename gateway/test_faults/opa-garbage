@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fault shim: "OPA succeeded and produced unusable output."
+#
+# THE NASTIEST OF THE THREE, and the reason this family exists at all.
+# Exit code 0 -- so a gate that checks only the return code concludes
+# everything worked, parses nothing useful, and with a sloppy default
+# reads the empty result as an ALLOW. Reading the rego would never catch
+# that; only running a process that lies about its success does.
+echo 'not-json: the policy engine emitted something unusable'
+exit 0

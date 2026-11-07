@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fault shim: "the OPA process hung."
+#
+# Sleeps far past any sane evaluation timeout. The gate must answer DENY
+# WITHIN its timeout -- asserted on the wall clock in test_gate.py,
+# because a gate that waits forever is a denial-of-service, not a
+# control. A hung dependency that blocks every request is an outage the
+# gate caused.
+sleep 300
