@@ -57,7 +57,7 @@ type SessionInfo struct {
 // acts inside, and the provenance derived from the context that produced
 // the action (see DerivedFrom).
 type CallContext struct {
-	Session    SessionInfo
+	Session     SessionInfo
 	DerivedFrom []string
 }
 

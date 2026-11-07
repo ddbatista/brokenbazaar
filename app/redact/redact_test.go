@@ -7,12 +7,16 @@ import (
 )
 
 func TestCredentialNamedFieldsAreRedacted(t *testing.T) {
+	// Inert placeholder values on purpose: this asserts on field NAMES,
+	// which is the whole of M2-N2, so nothing here needs to resemble a
+	// real credential -- and a realistic-looking key literal in a
+	// security repo only invites secret-scanner false positives.
 	in := map[string]string{
-		"session_token": "Bearer sk-live-9f3a",
-		"api_key":       "AKIAIOSFODNN7EXAMPLE",
-		"client_secret": "supersecret",
-		"admin_password": "hunter2",
-		"password":      "hunter3",
+		"session_token":  "tok-TESTVALUE-0001",
+		"api_key":        "tok-TESTVALUE-0002",
+		"client_secret":  "tok-TESTVALUE-0003",
+		"admin_password": "tok-TESTVALUE-0004",
+		"password":       "tok-TESTVALUE-0005",
 	}
 	out := Fields(in)
 	for _, k := range []string{"session_token", "api_key", "client_secret", "admin_password", "password"} {
@@ -23,7 +27,7 @@ func TestCredentialNamedFieldsAreRedacted(t *testing.T) {
 	// The input is never mutated: redaction produces a copy, so the raw
 	// argument map the executor holds is not also the map that leaks if
 	// someone logs the wrong one.
-	if in["api_key"] != "AKIAIOSFODNN7EXAMPLE" {
+	if in["api_key"] != "tok-TESTVALUE-0002" {
 		t.Fatal("Fields mutated its input")
 	}
 }
