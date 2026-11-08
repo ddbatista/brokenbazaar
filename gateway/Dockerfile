@@ -43,9 +43,21 @@ ENV POLICY_DIR=/gateway/policy \
 
 # Non-root. The gateway reads policy and writes one append-only file; it
 # has no reason to own either.
+#
+# /audit is 1777 -- world-writable WITH the sticky bit (T6 D1). The named
+# `audit` volume is populated from this directory on first mount, so this
+# mode is what the shared volume gets. Two writers, two uids: the gateway
+# (10001) writes gateway.jsonl, the vulnerable agent (distroless nonroot,
+# 65532) writes agent.jsonl. World-writable lets the agent create its
+# file; sticky stops it deleting or renaming the gateway's; and
+# gateway.jsonl is created 0644, so the agent cannot rewrite it either. A
+# compromised agent can therefore not erase the record of what it asked
+# the gate to do -- the property the rejected one-volume-same-uid shape
+# would have given away.
 RUN useradd --system --uid 10001 gateway \
     && mkdir -p /audit \
-    && chown -R gateway:gateway /audit
+    && chown gateway:gateway /audit \
+    && chmod 1777 /audit
 USER gateway:gateway
 
 EXPOSE 8081

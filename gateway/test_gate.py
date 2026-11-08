@@ -13,6 +13,7 @@ there.
 What each class is for:
 
     BootProbes            fail closed at startup, naming what is missing
+    ModeAgreement         M2-N4 -- one HARDENED grammar, a trustworthy /healthz
     Enrichment            the gateway establishes facts; policy decides
     PolicyDecisions       the real OPA, the real policy, both findings
     FaultInjection        D5.5 -- die, hang, garbage; all deny
@@ -31,6 +32,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -38,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import audit as audit_mod  # noqa: E402
 import decide as decide_mod  # noqa: E402
 import gate as gate_mod  # noqa: E402
+import mode as mode_mod  # noqa: E402
 import redact as redact_mod  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -107,22 +110,73 @@ class BootProbes(unittest.TestCase):
     """Fail closed at startup, loudly, naming what is wrong (D5.5)."""
 
     def test_missing_policy_refuses_to_start(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"TOOLS_SECRET": "x", "HARDENED": "false"}):
             empty = Path(tmp) / "no-policy"
             empty.mkdir()
-            os.environ["TOOLS_SECRET"] = "x"
             with self.assertRaises(SystemExit) as ctx:
                 gate_mod.boot(policy_dir=empty, audit_path=Path(tmp) / "a.jsonl")
             self.assertIn("no policy at", str(ctx.exception))
 
-    def test_missing_tools_secret_refuses_to_start(self):
-        with tempfile.TemporaryDirectory() as tmp:
+    def test_missing_tools_secret_refuses_to_start_when_hardened(self):
+        # T6 D3: the secret is required in HARDENED mode, mirroring the
+        # API's loadToolsSecret -- vulnerable mode has no internal route
+        # to authenticate to, and `make up` must boot with no secrets.
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"HARDENED": "true"}):
             os.environ.pop("TOOLS_SECRET", None)
             with self.assertRaises(SystemExit) as ctx:
                 gate_mod.boot(policy_dir=POLICY_DIR, audit_path=Path(tmp) / "a.jsonl")
             # D5b: an unset shared secret is a startup failure, never a
             # runtime 401 that surfaces as a missing document.
             self.assertIn("TOOLS_SECRET", str(ctx.exception))
+
+    def test_tools_secret_is_not_demanded_in_vulnerable_mode(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"HARDENED": "false"}):
+            os.environ.pop("TOOLS_SECRET", None)
+            try:
+                gate_mod.boot(policy_dir=POLICY_DIR, audit_path=Path(tmp) / "a.jsonl")
+            except SystemExit as exc:
+                # Boot may still refuse for OTHER reasons (no applied
+                # policy yet) -- but never for the secret.
+                self.assertNotIn("TOOLS_SECRET", str(exc))
+
+    def test_an_unparseable_mode_refuses_to_start(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"HARDENED": "ture", "TOOLS_SECRET": "x"}):
+            with self.assertRaises(SystemExit) as ctx:
+                gate_mod.boot(policy_dir=POLICY_DIR, audit_path=Path(tmp) / "a.jsonl")
+            self.assertIn("HARDENED", str(ctx.exception))
+            self.assertIn("ture", str(ctx.exception))
+
+
+class ModeAgreement(unittest.TestCase):
+    """M2-N4: one grammar for HARDENED, and a health body the API can trust."""
+
+    def test_parse_matches_the_shared_vectors(self):
+        # The same file app/mode/mode_test.go reads. A missing file
+        # fails: an absent contract must not read as agreement.
+        doc = json.loads((HERE / "mode_vectors.json").read_text(encoding="utf-8"))
+        self.assertTrue(doc["vectors"], "a contract with no cases asserts nothing")
+        for v in doc["vectors"]:
+            with self.subTest(raw=v["raw"]):
+                if v["want"] == "error":
+                    with self.assertRaises(ValueError):
+                        mode_mod.parse(v["raw"])
+                else:
+                    self.assertIs(mode_mod.parse(v["raw"]), v["want"])
+
+    def test_healthz_reports_a_boolean_mode(self):
+        # The API's probe accepts ONLY {"status":"ok","hardened":<bool>};
+        # T5's {"mode":"<raw env string>"} is refused by design.
+        with tempfile.TemporaryDirectory() as tmp:
+            for hardened in (True, False):
+                cfg = make_config(tmp)
+                cfg.hardened = hardened
+                body = gate_mod.healthz_body(cfg)
+                self.assertEqual(body, {"status": "ok", "hardened": hardened})
+                self.assertIs(type(body["hardened"]), bool)
 
 
 class Enrichment(unittest.TestCase):

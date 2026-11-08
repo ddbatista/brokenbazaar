@@ -51,6 +51,7 @@ from pathlib import Path
 
 import audit as audit_mod
 import decide as decide_mod
+import mode as mode_mod
 import redact as redact_mod
 from tools import documents, fetch
 
@@ -75,7 +76,8 @@ class Config:
     """
 
     def __init__(self, policy_dir, policy_data, schema, audit, api_base,
-                 tools_secret, opa_path=None, opa_timeout=decide_mod.DEFAULT_TIMEOUT):
+                 tools_secret, opa_path=None, opa_timeout=decide_mod.DEFAULT_TIMEOUT,
+                 hardened=False):
         self.policy_dir = policy_dir
         self.policy_data = policy_data
         self.schema = schema
@@ -84,6 +86,9 @@ class Config:
         self.tools_secret = tools_secret
         self.opa_path = opa_path
         self.opa_timeout = opa_timeout
+        # Parsed once, strictly, at boot (M2-N4). Reported on /healthz so
+        # the API can refuse to start on a split brain.
+        self.hardened = hardened
 
     @property
     def allowlist(self):
@@ -108,6 +113,15 @@ def boot(policy_dir=None, audit_path=None) -> Config:
     """
     policy_dir = Path(policy_dir or os.getenv("POLICY_DIR") or DEFAULT_POLICY_DIR)
     problems = []
+
+    # Strict parse (M2-N4): "ture" is a refusal, never a silent default.
+    # If it fails, assume hardened for the remaining probes so every
+    # problem is reported at once -- boot refuses either way.
+    try:
+        hardened = mode_mod.from_env()
+    except ValueError as exc:
+        problems.append(str(exc))
+        hardened = True
 
     policy_file = policy_dir / "policy.rego"
     data_file = policy_dir / "data.json"
@@ -143,10 +157,14 @@ def boot(policy_dir=None, audit_path=None) -> Config:
 
     api_base = os.getenv("API_BASE_URL", "http://api:8080")
     tools_secret = os.getenv("TOOLS_SECRET", "")
-    if not tools_secret:
+    if not tools_secret and hardened:
         # D5b extended by the T6 mode-agreement check: an unset shared
         # secret is a startup failure, not a runtime 401 that looks like
-        # a missing document three layers up.
+        # a missing document three layers up. HARDENED only (T6 D3),
+        # mirroring the API's loadToolsSecret: in vulnerable mode the API
+        # registers no internal route and the agent never asks the gate,
+        # so there is nothing for the secret to authenticate to -- and
+        # `make up` must boot with no secrets set.
         problems.append("TOOLS_SECRET is not set (read_document cannot be mediated)")
 
     if problems:
@@ -154,7 +172,18 @@ def boot(policy_dir=None, audit_path=None) -> Config:
             "gateway: refusing to start:\n  - " + "\n  - ".join(problems))
 
     return Config(policy_dir, policy_data, schema, audit, api_base,
-                  tools_secret, opa_path=opa_path)
+                  tools_secret, opa_path=opa_path, hardened=hardened)
+
+
+def healthz_body(cfg: Config) -> dict:
+    """What /healthz answers. M2-N4's wire half.
+
+    A BOOLEAN under "hardened", parsed at boot -- not the raw env string
+    T5 reported under "mode". The API's probe accepts only this shape and
+    treats anything else as no answer, so an old gateway image cannot
+    pass the agreement check by accident.
+    """
+    return {"status": "ok", "hardened": bool(cfg.hardened)}
 
 
 def enrich(tool: str, args: dict) -> tuple[dict, str]:
@@ -337,10 +366,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/healthz":
             self._send(404, {"error": "not found"})
             return
-        # M2-N4: the gateway announces the mode it believes it is in, so
-        # a split brain between the two processes is visible rather than
-        # latent. The agreement CHECK itself lands in T6.
-        self._send(200, {"status": "ok", "mode": os.getenv("HARDENED", "false")})
+        # M2-N4: the gateway announces the mode it parsed at boot; the
+        # API and the agent refuse to start unless it matches
+        # (app/mode/gateway.go, mode.CheckGateway).
+        self._send(200, healthz_body(self.cfg))
 
     def do_POST(self):
         if self.path != "/gate":

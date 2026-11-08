@@ -176,7 +176,7 @@ func (s sealedMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func registerHardened(h *docHandlers, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
 	mux := http.NewServeMux()
 	routes := []route{
-		{http.MethodGet, "/healthz", authNone, noClaims(healthzHandler)},
+		{http.MethodGet, "/healthz", authNone, noClaims(healthzHandler(true))},
 		{http.MethodPost, "/auth/token", authNone, noClaims(authTokenHandler(admin, secret, true))},
 		{http.MethodGet, "/me", authToken, h.me},
 		{http.MethodGet, "/orgs/{org_id}/documents", authToken, h.listOrSearch},
@@ -233,7 +233,7 @@ func registerHardened(h *docHandlers, admin *store.AdminStore, secret, toolsSecr
 // simply does not exist in this mode, which is the SR-B1-1 contrast the lab is
 // teaching.
 func registerVulnerable(mux *http.ServeMux, h *docHandlers, admin *store.AdminStore, secret []byte) {
-	mux.HandleFunc("/healthz", healthzHandler)
+	mux.HandleFunc("/healthz", healthzHandler(false))
 	mux.HandleFunc("/auth/token", authTokenHandler(admin, secret, false))
 
 	mux.HandleFunc("GET /me", requireToken(secret, false, h.me))

@@ -17,6 +17,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ddbatista/brokenbazaar/app/mode"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -44,9 +45,10 @@ type healthResponse struct {
 	Module   string `json:"module"`
 }
 
-func hardened() bool {
-	return os.Getenv("HARDENED") == "true"
-}
+// The mode is parsed ONCE, strictly, in main (app/mode, M2-N4). The
+// M1 reader -- os.Getenv("HARDENED") == "true" -- silently read "ture"
+// as vulnerable; it is gone rather than kept beside the strict one,
+// because two parsers in one process is the split brain in miniature.
 
 // loadJWTSecret returns the HMAC signing key for POST /auth/token.
 //
@@ -117,15 +119,17 @@ func healthcheck() int {
 	return 0
 }
 
-func healthzHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(healthResponse{
-		Status:   "ok",
-		Service:  "brokenbazaar-api",
-		Hardened: hardened(),
-		Module:   "M0",
-	})
+func healthzHandler(hardened bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(healthResponse{
+			Status:   "ok",
+			Service:  "brokenbazaar-api",
+			Hardened: hardened,
+			Module:   "M0",
+		})
+	}
 }
 
 func main() {
@@ -135,6 +139,13 @@ func main() {
 		os.Exit(healthcheck())
 	}
 
+	// Strict parse (M2-N4): a value that is neither "true", "false" nor
+	// unset is a refusal to start, never a silent default.
+	hardened, err := mode.FromEnv()
+	if err != nil {
+		log.Fatalf("api: %v", err)
+	}
+
 	// The serving path needs the database; the -healthcheck path above does
 	// not, which is why the pool is opened only here.
 	ctx := context.Background()
@@ -142,6 +153,13 @@ func main() {
 	if dbURL == "" {
 		log.Fatal("api: DATABASE_URL is not set")
 	}
+	// M2-N4: refuse to start unless the gateway agrees on the mode. Before
+	// the pool opens and before anything listens, so a split-brain stack
+	// never serves a single request. Both modes (T6 D3).
+	if err := mode.CheckGatewayFromEnv(ctx, hardened, mode.APIProbeAttempts); err != nil {
+		log.Fatalf("api: %v", err)
+	}
+
 	pool, err := store.Open(ctx, dbURL)
 	if err != nil {
 		log.Fatal(err)
@@ -149,9 +167,9 @@ func main() {
 	defer pool.Close()
 
 	admin := store.NewAdminStore(pool)
-	jwtSecret := loadJWTSecret(hardened())
+	jwtSecret := loadJWTSecret(hardened)
 
-	handlers := &docHandlers{admin: admin, pool: pool, hardened: hardened()}
+	handlers := &docHandlers{admin: admin, pool: pool, hardened: hardened}
 	// SR-B1-1 (deny-by-default route registration) lands here in T5, now that
 	// the token-protected document routes (D4) exist and there is something to
 	// protect. The two modes register differently on purpose: hardened mode
@@ -166,7 +184,7 @@ func main() {
 	// so a handler registered straight onto the mux bypassed SR-B1-1
 	// entirely. There is no longer a mux in scope here to register onto.
 	var handler http.Handler
-	if hardened() {
+	if hardened {
 		handler = registerHardened(handlers, admin, jwtSecret, loadToolsSecret(true))
 	} else {
 		// Vulnerable mode keeps the bare mux on purpose: no table, no
@@ -183,7 +201,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("brokenbazaar api listening on %s (HARDENED=%v)", listenAddr, hardened())
+	log.Printf("brokenbazaar api listening on %s (HARDENED=%v)", listenAddr, hardened)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
