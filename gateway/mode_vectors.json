@@ -1,0 +1,16 @@
+{
+  "_comment": "M2-N4 / T6 D3: how HARDENED is parsed, frozen ONCE and read by both languages' tests (app/mode/mode_test.go, gateway/test_gate.py). Two parsers in two languages with two test tables would drift silently -- the same argument D5.4 makes about redact.json. 'error' means the process refuses to start.",
+  "vectors": [
+    {"raw": "true",   "want": true},
+    {"raw": "false",  "want": false},
+    {"raw": "",       "want": false},
+    {"raw": "ture",   "want": "error"},
+    {"raw": "TRUE",   "want": "error"},
+    {"raw": "True",   "want": "error"},
+    {"raw": "1",      "want": "error"},
+    {"raw": "yes",    "want": "error"},
+    {"raw": " true",  "want": "error"},
+    {"raw": "true ",  "want": "error"},
+    {"raw": "0",      "want": "error"}
+  ]
+}

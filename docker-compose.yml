@@ -3,6 +3,15 @@
 #
 # HARDENED ENVIRONMENT: this file is a hardened zone (see CLAUDE.md).
 
+# The two hostile fixtures are addressed BY NAME, from every container
+# that may fetch (D6): the URLs read honestly in the writeups instead of
+# as http://collector:9000/. Fixed IPs on a pinned subnet make the names
+# stable. The literal 169.254.169.254 is NOT reachable -- that spike was
+# not run (T6 D4); GCP addresses its metadata server by this name too.
+x-fixture-hosts: &fixture-hosts
+  - "metadata.google.internal:172.28.0.20"
+  - "attacker.example:172.28.0.21"
+
 services:
   db:
     image: postgres:16-alpine
@@ -26,15 +35,25 @@ services:
     build:
       context: ./app
       dockerfile: Dockerfile
+      target: api
     container_name: bb-api
     environment:
       HARDENED: "${HARDENED:-false}"
       JWT_SECRET: "${JWT_SECRET:-}"
+      # D5b: the credential the gateway presents on the internal tool
+      # route. No default, deliberately -- unset in hardened mode is a
+      # startup panic naming the route (T6.0).
+      TOOLS_SECRET: "${TOOLS_SECRET:-}"
+      # M2-N4: the API probes the gateway's mode before serving and
+      # refuses to start on a split brain.
+      GATEWAY_URL: "http://gateway:8081"
       DATABASE_URL: "postgres://bazaar:bazaar@db:5432/bazaar?sslmode=disable"
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
       db:
+        condition: service_healthy
+      gateway:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/app/api", "-healthcheck"]
@@ -43,17 +62,110 @@ services:
       retries: 10
     networks: [bazaar]
 
+  # The only thing that may execute a tool in hardened mode (D5). Not
+  # published to the host: nothing outside the stack has a reason to
+  # call /gate.
+  gateway:
+    build:
+      context: ./gateway
+    container_name: bb-gateway
+    environment:
+      HARDENED: "${HARDENED:-false}"
+      TOOLS_SECRET: "${TOOLS_SECRET:-}"
+      API_BASE_URL: "http://api:8080"
+    volumes:
+      - audit:/audit
+    extra_hosts: *fixture-hosts
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [bazaar]
+
+  # One agent session per `docker compose run` (T6 D1) -- not a daemon.
+  # Profile-gated, so `up` never starts it. Its binary is chosen at image
+  # build time by AGENT_TAGS (T6 D2): unset builds HARDENED, and the
+  # binary refuses to run if it disagrees with $HARDENED or with the
+  # gateway (M2-N4). Holds no TOOLS_SECRET, by construction (D5b).
+  agent:
+    profiles: [agent]
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: agent
+      args:
+        AGENT_TAGS: "${AGENT_TAGS:-}"
+    environment:
+      HARDENED: "${HARDENED:-false}"
+      GATEWAY_URL: "http://gateway:8081"
+      DATABASE_URL: "postgres://bazaar:bazaar@db:5432/bazaar?sslmode=disable"
+      AGENT_AUDIT_PATH: "/audit/agent.jsonl"
+    volumes:
+      - audit:/audit
+    extra_hosts: *fixture-hosts
+    depends_on:
+      db:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    networks: [bazaar]
+
+  # --- HOSTILE FIXTURES (M2, D6) -----------------------------------------
+  # Same image, different script. Both listen on :80 unprivileged; the
+  # sysctl is set here rather than inherited from Docker's default so the
+  # dependency is visible.
+  mock-metadata:
+    build:
+      context: ./fixtures
+    container_name: bb-mock-metadata
+    command: ["mock_metadata.py"]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      bazaar:
+        ipv4_address: 172.28.0.20
+
+  collector:
+    build:
+      context: ./fixtures
+    container_name: bb-collector
+    command: ["collector.py"]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    # Published so a host-side PoC can read GET /received (finding 03's
+    # evidence). Loopback only, like every port in this file.
+    ports:
+      - "127.0.0.1:9100:80"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/received', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      bazaar:
+        ipv4_address: 172.28.0.21
+
   # --- Services below arrive with their modules ---------------------------
-  # gateway         (M2) Python judge + OPA sidecar, ported from jev-lab
-  # agent           (M2) Go agent loop
-  # mock-metadata   (M2) fake cloud metadata endpoint, makes SSRF reproducible
-  #                      without a cloud account
   # evil-mcp        (M4a) attacker-controlled MCP server        [hostile fixture]
   # evil-publisher  (M4b) mutable skill-reference host          [hostile fixture]
 
 volumes:
   db-data:
+  # Both JSONL writers append here: gateway.jsonl (gateway, uid 10001) and
+  # agent.jsonl (vulnerable agent, uid 65532). The directory is 1777 from
+  # the gateway image, so the agent can create its file but cannot delete,
+  # rename or rewrite the gateway's (T6 D1).
+  audit:
 
 networks:
   bazaar:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

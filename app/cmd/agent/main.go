@@ -24,6 +24,7 @@ import (
 	"os"
 
 	"github.com/ddbatista/brokenbazaar/app/agent"
+	"github.com/ddbatista/brokenbazaar/app/mode"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -41,6 +42,23 @@ func main() {
 
 	if *sessionID == "" || *orgID == "" {
 		log.Fatal("agent: -session and -org are both required (see `make seed` output)")
+	}
+
+	// M2-N4 / T6 D2: the compiled mode must match the stack's mode, or
+	// the binary refuses before touching the database.
+	envHardened, err := mode.FromEnv()
+	if err != nil {
+		log.Fatalf("agent: %v", err)
+	}
+	if err := agent.CheckBuildMatchesEnv(envHardened); err != nil {
+		log.Fatalf("agent: %v", err)
+	}
+	// ...and the gateway must agree with both. The agent is a one-shot
+	// `compose run`, so it can be started against a stack brought up in
+	// the other mode; the API's own probe ran at ITS startup and cannot
+	// see this process. Checked in both modes, like the API (T6 D3).
+	if err := mode.CheckGatewayFromEnv(context.Background(), envHardened, mode.AgentProbeAttempts); err != nil {
+		log.Fatalf("agent: %v", err)
 	}
 
 	// Same loud-or-absent rule as migrate/seed/api: no hardcoded

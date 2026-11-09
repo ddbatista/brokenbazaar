@@ -1,0 +1,14 @@
+{
+  "tools": [
+    "read_document",
+    "http_fetch"
+  ],
+  "capabilities": [
+    "read_document",
+    "http_fetch"
+  ],
+  "egress_allowlist": [
+    "docs.example",
+    "metadata.google.internal"
+  ]
+}
