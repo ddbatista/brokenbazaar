@@ -60,7 +60,7 @@ jobs:
 
       - name: hardened mode also starts
         run: |
-          JWT_SECRET=ci-only-not-a-secret make harden
+          JWT_SECRET=ci-only-not-a-secret TOOLS_SECRET=ci-only-not-a-secret-either make harden
           curl -fsS http://localhost:8080/healthz | grep -q '"hardened":true'
 
       - name: logs on failure
@@ -92,7 +92,7 @@ jobs:
 
         - name: hardened mode -- every exploit must be BLOCKED
           run: |
-            JWT_SECRET=ci-only-not-a-secret make harden
+            JWT_SECRET=ci-only-not-a-secret TOOLS_SECRET=ci-only-not-a-secret-either make harden
             cd attacks && ./run.py --mode hardened --base-url http://localhost:8080
 
         - name: logs on failure

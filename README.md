@@ -86,7 +86,7 @@ JWT_SECRET=<any-value> make detect   # replay + probe sweep; measured detect-vs-
 | `attacks/` | One dir per finding: `exploit.py`, `README.md`, `expected.json`, `ANSWER-KEY.md` |
 | `defenses/` | Control design docs — *why* this control, not just what |
 | `detections/` | Detection rules + replay harness + coverage report |
-| `fixtures/` | Attacker-controlled artifacts (`evil-mcp/`, `evil-skill/`) as first-class test data |
+| `fixtures/` | Attacker-controlled artifacts as first-class test data. M2 adds two Compose fixtures from one image: `collector` (`attacker.example`, the exfiltration sink finding 03 asserts against — **a layout amendment**: it was not in the M0 reservations, see `threat-models/m2-agent-gateway.md` D6) and `mock-metadata` (`metadata.google.internal`, finding 04). `evil-mcp/` (M4a) and `evil-skill/` (M4b) follow |
 | `threat-models/` | v0 baseline + one diff per module, committed *before* the feature |
 | `coverage/` | Framework map + **declared non-coverage** |
 | `writeups/` | Blog-grade, one per finding |
