@@ -1,0 +1,6 @@
+{
+  "headers": ["authorization", "cookie", "set-cookie", "proxy-authorization", "x-api-key", "x-auth-token"],
+  "fields_exact": ["password", "secret", "credential", "private_key", "access_key"],
+  "fields_suffix": ["_key", "_token", "_secret", "_password", "_credential"],
+  "_residual": "Free-form values are NOT covered: a URL query parameter may carry anything (finding 03's data= parameter carries tenant bytes by design), as may novel field names and non-string encodings. Redaction is by field name, never by value shape (M2-N2). Pinned by the residual tests in app/redact/redact_test.go and gateway/test_gate.py, which assert a token inside a URL SURVIVES."
+}
