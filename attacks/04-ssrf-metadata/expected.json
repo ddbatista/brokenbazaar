@@ -1,0 +1,18 @@
+{
+  "finding": "04-ssrf-metadata",
+  "boundary": "B5, B7",
+  "frameworks": [
+    "LLM06:2025",
+    "MCP05:2025",
+    "A10:2021"
+  ],
+  "vulnerable": {
+    "exit_code": 0,
+    "stdout_contains": "ya29.FAKE-brokenbazaar-lab-token"
+  },
+  "hardened": {
+    "exit_code": 1,
+    "stdout_contains": "gateway denied: resolved_address_denied"
+  },
+  "timeout_s": 300
+}

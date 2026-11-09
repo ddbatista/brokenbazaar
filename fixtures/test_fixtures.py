@@ -120,6 +120,16 @@ class Collector(unittest.TestCase):
         # Oldest dropped, newest kept.
         self.assertEqual([r["query"] for r in got], ["i=2", "i=3", "i=4"])
 
+    def test_records_carry_a_monotonic_seq_that_survives_the_cap(self):
+        # Exploits window receipts by seq, not by list length: at the cap
+        # the length stops moving while seq keeps counting.
+        small = _Served(lambda h, p: collector.make_server(h, p, max_records=2))
+        self.addCleanup(small.close)
+        for i in range(4):
+            small.request("GET", f"/c?i={i}")
+        _, _, body = small.request("GET", "/received")
+        self.assertEqual([r["seq"] for r in json.loads(body)["received"]], [3, 4])
+
     def test_production_cap_is_finite(self):
         self.assertGreater(collector.MAX_RECORDS, 0)
 

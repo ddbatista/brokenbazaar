@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 BASE_URL ?= http://localhost:8080
 
-.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures agent verify-agent-builds verify-agent-images wait require-hardened-secrets
+.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks agent verify-agent-builds verify-agent-images wait require-hardened-secrets
 DATABASE_URL ?= postgres://bazaar:bazaar@127.0.0.1:5432/bazaar?sslmode=disable
 
 help: ## Show this help
@@ -79,6 +79,9 @@ agent: ## Run one agent session in the stack: make agent SESSION=<id> ORG=<id> [
 test-fixtures: ## Run the hostile-fixture contract tests (stdlib unittest, loopback only)  (M2, T6)
 	python3 -m unittest discover -s fixtures -t fixtures -p 'test_*.py'
 
+test-attacks: ## Run the agent-exploit helper tests (stdlib unittest, no stack)  (M2, T7)
+	python3 -m unittest discover -s attacks -t attacks -p 'test_*.py'
+
 test-gateway: ## Run the Python gateway tests (stdlib unittest, no network)  (M2)
 	@echo "== gateway tool tests =="
 	python3 -m unittest discover -s gateway/tools -t gateway
@@ -142,6 +145,8 @@ test: ## Run the regression suite (go unit tests both tag sets, then the attack 
 	$(MAKE) --no-print-directory test-gateway
 	@echo ""
 	$(MAKE) --no-print-directory test-fixtures
+	@echo ""
+	$(MAKE) --no-print-directory test-attacks
 	@echo ""
 	$(MAKE) --no-print-directory verify-agent-builds
 	@echo ""
