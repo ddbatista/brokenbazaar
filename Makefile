@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 BASE_URL ?= http://localhost:8080
 
-.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks agent verify-agent-builds verify-agent-images wait require-hardened-secrets
+.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks test-gateway-image faults leakscan agent verify-agent-builds verify-agent-images wait require-hardened-secrets
 DATABASE_URL ?= postgres://bazaar:bazaar@127.0.0.1:5432/bazaar?sslmode=disable
 
 help: ## Show this help
@@ -79,6 +79,23 @@ agent: ## Run one agent session in the stack: make agent SESSION=<id> ORG=<id> [
 test-fixtures: ## Run the hostile-fixture contract tests (stdlib unittest, loopback only)  (M2, T6)
 	python3 -m unittest discover -s fixtures -t fixtures -p 'test_*.py'
 
+test-gateway-image: ## Run the gateway suite INSIDE its image: the shipped OPA, the applied policy, zero skips  (M2, T8)
+	@docker build -q -t bb-gateway-test gateway >/dev/null
+	@# "Zero skips" is ASSERTED, not claimed: the policy tests skip (and
+	@# unittest still says OK) when OPA or the policy is missing, and that
+	@# must fail here -- found at T8 review.
+	@out=$$(docker run --rm --entrypoint python3 -v "$(CURDIR):/repo:ro" -w /repo bb-gateway-test \
+		-m unittest discover -s gateway -t gateway -p 'test_*.py' 2>&1); status=$$?; \
+		echo "$$out" | tail -3; \
+		[ $$status -eq 0 ] || exit $$status; \
+		if echo "$$out" | grep -q "skipped="; then echo "FAIL: tests were SKIPPED inside the gateway image -- OPA or the policy is missing"; exit 1; fi
+
+faults: ## Break the gate for real (OPA removed, gateway stopped); every exploit must exit 2  (M2, T8; hardened stack)
+	python3 attacks/faults.py
+
+leakscan: ## MCP01: no platform secret or JWT in any audit store; secrets read from the running stack  (M2, T8)
+	python3 attacks/leakscan.py
+
 test-attacks: ## Run the agent-exploit helper tests (stdlib unittest, no stack)  (M2, T7)
 	python3 -m unittest discover -s attacks -t attacks -p 'test_*.py'
 
@@ -95,7 +112,7 @@ test-gateway: ## Run the Python gateway tests (stdlib unittest, no network)  (M2
 test-policy: ## Run `opa test` against the SAME digest the gateway ships  (M2, T0)
 	@test -d gateway/policy && test -f gateway/policy/policy.rego || { \
 		echo "gateway/policy/ is not applied yet -- see PROPOSED-POLICY.md"; exit 2; }
-	docker run --rm -v "$(PWD)/gateway/policy:/policy:ro" \
+	docker run --rm -v "$(CURDIR)/gateway/policy:/policy:ro" \
 		openpolicyagent/opa@sha256:895872de1e8dc5b82e04f9410d2d1ada2f72d28fdcdba0e8789d91cfc27ec0d0 \
 		test /policy
 

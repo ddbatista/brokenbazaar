@@ -77,6 +77,15 @@ the run exits 2.
 Shared code for both lives in `attacks/agentlab.py`, with its parsers tested in
 `attacks/test_agentlab.py` (`make test-attacks`).
 
+**Two checks run after the suites (M2 T8), and neither is an exploit:**
+- `leakscan.py` (`make leakscan`, MCP01): no platform secret and no JWT in any audit store.
+- `faults.py` (`make faults`): breaks the gate for real (OPA removed, then the gateway stopped).
+  Every agent exploit must then exit **2**; an exit 1 under a fault is a silent pass and fails the
+  check.
+
+Their judging logic is tested in `attacks/test_ci_checks.py`. They live beside the exploits, not in
+`0*-*/`, so `run.py`'s glob never mistakes them for findings.
+
 ## The two-mode assertion
 
 This is what makes a PoC a regression test rather than a demo:
