@@ -92,6 +92,24 @@ class SecretsComeFromTheStack(unittest.TestCase):
             leakscan.dev_secret_from("no such constant")
 
 
+class NeverPrintsASecret(unittest.TestCase):
+    """CodeQL py/clear-text-logging-sensitive-data on PR #4 flagged the
+    scan's banner, which was built FROM the secrets dict. It printed
+    only the keys, but one `.items()` away from printing values. The
+    banner now comes from a constant that holds no secret at all."""
+
+    def test_the_banner_names_secrets_without_touching_their_values(self):
+        banner = leakscan.scan_banner()
+        for name in leakscan.SECRET_NAMES:
+            self.assertIn(name, banner)
+        self.assertNotIn("dev-secret", banner)
+
+    def test_the_secret_names_are_the_ones_scanned(self):
+        # The constant and the dict built from the stack must not drift.
+        self.assertEqual(set(leakscan.SECRET_NAMES),
+                         {"DEV_JWT_SECRET", "JWT_SECRET", "TOOLS_SECRET"})
+
+
 class StoresMustHaveContent(unittest.TestCase):
     def test_an_empty_store_is_operational_not_clean(self):
         with self.assertRaises(leakscan.Operational):

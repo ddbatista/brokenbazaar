@@ -47,6 +47,13 @@ from dataclasses import dataclass
 from agentlab import EXIT_OPERATIONAL, REPO, Operational
 
 MIN_SECRET_LEN = 8
+
+# What the scan looks for, by NAME. Output is built from this constant,
+# never from the dict of values: CodeQL (py/clear-text-logging-sensitive-
+# data, PR #4) flagged a banner derived from that dict. It printed keys
+# only, but one `.items()` from printing values -- a scan for leaked
+# secrets must not be one edit away from being the leak.
+SECRET_NAMES = ("DEV_JWT_SECRET", "JWT_SECRET", "TOOLS_SECRET")
 API_MAIN = REPO / "app" / "api" / "main.go"
 
 JWT_SHAPE = re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*")
@@ -135,6 +142,8 @@ def known_secrets() -> dict:
     if env_value(gateway, "TOOLS_SECRET") != secrets["TOOLS_SECRET"]:
         raise Operational("api and gateway hold different TOOLS_SECRETs -- the stack is "
                           "misconfigured; the scan would cover only one of them")
+    if set(secrets) != set(SECRET_NAMES):
+        raise Operational("the secrets read do not match SECRET_NAMES -- fix the scan, not the check")
     for name in ("JWT_SECRET", "TOOLS_SECRET"):
         mine = os.environ.get(name)
         if mine and mine != secrets[name]:
@@ -154,6 +163,10 @@ def read_stores() -> dict:
     }
 
 
+def scan_banner() -> str:
+    return f"for {', '.join(SECRET_NAMES)} (read from the running stack) and bearer JWTs"
+
+
 def main() -> int:
     try:
         secrets = known_secrets()
@@ -165,7 +178,7 @@ def main() -> int:
         return EXIT_OPERATIONAL
     sizes = ", ".join(f"{n} ({len(t.splitlines())} lines)" for n, t in stores.items())
     print(f"scanned {sizes}")
-    print(f"for {', '.join(sorted(secrets))} (read from the running stack) and bearer JWTs")
+    print(scan_banner())
     if leaks:
         for leak in leaks:
             print(f"LEAK: {leak}")
