@@ -44,6 +44,43 @@ jobs:
             echo "not gofmt'd:"; echo "$unformatted"; exit 1
           fi
 
+  unit:
+    name: unit suites (Go both tags, Python, policy, D5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: app/go.sum
+
+      - name: go test -- hardened build
+        working-directory: app
+        run: go test ./...
+
+      - name: go test -- vulnerable build
+        # The default build never compiles the naive assembler or
+        # executor, so a vulnerable-only break would hide without this.
+        working-directory: app
+        run: go test -tags vulnerable ./...
+
+      - name: opa test (the same digest the gateway ships)
+        run: make test-policy
+
+      - name: gateway suite, inside the gateway image (real OPA, zero skips)
+        run: make test-gateway-image
+
+      - name: fixture contracts
+        run: make test-fixtures
+
+      - name: attack helpers, leak scan and fault judges
+        run: make test-attacks
+
+      - name: D5 -- the hardened agent binary holds no tool code
+        run: make verify-agent-builds
+
   stack:
     name: stack starts from clean clone
     runs-on: ubuntu-latest
@@ -94,6 +131,19 @@ jobs:
           run: |
             JWT_SECRET=ci-only-not-a-secret TOOLS_SECRET=ci-only-not-a-secret-either make harden
             cd attacks && ./run.py --mode hardened --base-url http://localhost:8080
+
+        - name: MCP01 -- no platform secret or JWT in any audit store
+          # After BOTH suites: the stores now hold vulnerable and hardened
+          # runs. The secrets are read from the RUNNING stack, not repeated
+          # here -- a second copy could drift and make the scan search for
+          # a value the stack never had. Exit 2 if a store is empty.
+          run: make leakscan
+
+        - name: fault injection -- a broken gate must never read as "control held"
+          # Last, because it breaks the stack on purpose (and undoes it).
+          # OPA removed from the live gateway, then the gateway stopped;
+          # every exploit must exit 2 naming the fault (SR-B5-5, D5.5).
+          run: make faults
 
         - name: logs on failure
           if: failure()
