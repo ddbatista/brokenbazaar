@@ -36,13 +36,15 @@ func Schedule(arms []string, n int) []Trial {
 // (the key travels in one), only the provider's request id.
 type Record struct {
 	Experiment       string          `json:"experiment"`
+	Protocol         string          `json:"protocol"`
 	Arm              string          `json:"arm"`
 	Trial            int             `json:"trial"`
 	TS               string          `json:"ts"`
 	Model            string          `json:"model_requested"`
 	ResponseModel    string          `json:"model_responded,omitempty"`
-	AnthropicVersion string          `json:"anthropic_version"`
-	Effort           string          `json:"effort"`
+	AnthropicVersion string          `json:"anthropic_version,omitempty"`
+	Effort           string          `json:"effort,omitempty"`
+	Temperature      *float64        `json:"temperature,omitempty"`
 	Sampling         string          `json:"sampling"`
 	RequestID        string          `json:"request_id,omitempty"`
 	Status           int             `json:"status,omitempty"`
@@ -68,7 +70,10 @@ type ArmSummary struct {
 	HiExclRead   float64        `json:"wilson95_hi_excluding_read_again"`
 	Counts       map[string]int `json:"counts"`
 	AllIdentical bool           `json:"all_responses_identical"`
-	distinct     map[[32]byte]bool
+
+	TextNamesAttacker int `json:"diag_text_names_attacker"`
+	Empty             int `json:"diag_empty"`
+	distinct          map[[32]byte]bool
 }
 
 // Comparison is the pre-registered test of an A arm against B.
@@ -122,13 +127,20 @@ func Run(ctx context.Context, s Sender, in Inputs, p Prereg, w io.Writer, key st
 		if err != nil {
 			return sum.finish(), err
 		}
-		reqJSON, _ := json.Marshal(req)
-		rec := Record{Experiment: "03-injection-compliance", Arm: t.Arm, Trial: t.Index,
+		rec := Record{Experiment: p.Experiment, Protocol: p.Protocol, Arm: t.Arm, Trial: t.Index,
 			TS: time.Now().UTC().Format(time.RFC3339), Model: p.Model, AnthropicVersion: p.AnthropicVersion,
-			Effort: p.Effort, Sampling: p.Sampling, Request: reqJSON}
+			Effort: p.Effort, Temperature: p.Temperature, Sampling: p.Sampling}
 
 		reply, sendErr := s.Send(ctx, req)
 		rec.RequestID, rec.Status = reply.RequestID, reply.Status
+		// The evidence is the body that went over the wire, in the
+		// protocol it went in; a test fake that sends nothing falls back
+		// to the rendered conversation.
+		if len(reply.Sent) > 0 {
+			rec.Request = json.RawMessage(reply.Sent)
+		} else if rec.Request, err = encodeRequest(p, req); err != nil {
+			return sum.finish(), err
+		}
 		var parsed responseBody
 		switch {
 		case sendErr != nil && (ctx.Err() != nil || errors.Is(sendErr, context.Canceled)):
@@ -140,7 +152,7 @@ func Run(ctx context.Context, s Sender, in Inputs, p Prereg, w io.Writer, key st
 		case sendErr != nil:
 			rec.Outcome, rec.Error = Outcome{Kind: KindError}, sendErr.Error()
 		default:
-			parsed, err = parseResponse(reply.Body)
+			parsed, err = decodeResponse(p, reply.Body)
 			if err != nil && inFirstRound {
 				return sum, fmt.Errorf("aborted in the first round, before any data (%s): %w", t.Arm, err)
 			}
@@ -159,7 +171,7 @@ func Run(ctx context.Context, s Sender, in Inputs, p Prereg, w io.Writer, key st
 		if err != nil {
 			return sum.finish(), err
 		}
-		if key != "" && bytes.Contains(line, []byte(key)) {
+		if ContainsKey(line, key) {
 			return sum.finish(), fmt.Errorf("refusing to write %s trial %d: the record contains MODEL_API_KEY", t.Arm, t.Index)
 		}
 		line = append(line, '\n')
@@ -193,6 +205,12 @@ func Run(ctx context.Context, s Sender, in Inputs, p Prereg, w io.Writer, key st
 		if rec.Outcome.Exfiltrated {
 			a.Exfiltrated++
 		}
+		if rec.Outcome.TextNamesAttacker {
+			a.TextNamesAttacker++
+		}
+		if rec.Outcome.Empty {
+			a.Empty++
+		}
 	}
 	return sum.finish(), nil
 }
@@ -223,6 +241,17 @@ func (s Summary) finish() Summary {
 	return s
 }
 
+// ContainsKey reports whether b holds the key, raw or as encoding/json
+// writes it (it escapes <, > and & -- a raw match would miss a key that
+// contains them once it sits inside a record).
+func ContainsKey(b []byte, key string) bool {
+	if key == "" {
+		return false
+	}
+	escaped, _ := json.Marshal(key)
+	return bytes.Contains(b, []byte(key)) || bytes.Contains(b, escaped[1:len(escaped)-1])
+}
+
 // Text is the human-readable result table.
 func (s Summary) Text() string {
 	var b strings.Builder
@@ -245,6 +274,10 @@ func (s Summary) Text() string {
 		if a.Counts[KindReadAgain] > 0 {
 			fmt.Fprintf(&b, "          excluding read_again (censored): %d/%d = %.1f%% [%.1f%%, %.1f%%]\n",
 				a.Complied, a.ExclRead, 100*a.RateExclRead, 100*a.LoExclRead, 100*a.HiExclRead)
+		}
+		if a.TextNamesAttacker > 0 || a.Empty > 0 {
+			fmt.Fprintf(&b, "          diagnostics: text names %s in %d, empty replies %d (not outcomes; see the README)\n",
+				"the attacker host", a.TextNamesAttacker, a.Empty)
 		}
 		if a.AllIdentical {
 			fmt.Fprintf(&b, "          !! all %d responses identical -- sampling may not be stochastic; n is not %d independent draws\n", a.Completed, a.Completed)

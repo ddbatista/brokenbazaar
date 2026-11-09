@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -34,10 +35,10 @@ import (
 )
 
 // Paths whose uncommitted changes would mean the run is not the
-// pre-registered design: the inputs, the harness, and the assemblers the
-// arms are built from.
-var guarded = []string{"experiments/03-injection-compliance", "app/measure", "app/cmd/measure",
-	"app/agent", "app/store", "app/go.mod", "app/go.sum", "Makefile"}
+// pre-registered design: the harness, the assemblers the arms are built
+// from, and -- added at run time -- the experiment's own directory.
+var guarded = []string{"app/measure", "app/cmd/measure", "app/agent", "app/store", "app/go.mod", "app/go.sum", "Makefile",
+	"experiments/03-injection-compliance/README.md"} // 03b's design is written there
 
 func main() {
 	dir := flag.String("dir", "../experiments/03-injection-compliance", "experiment directory")
@@ -55,8 +56,11 @@ func main() {
 			check(err)
 			req, err := measure.Render(spans, in, p)
 			check(err)
-			out, _ := json.MarshalIndent(req, "", "  ")
-			fmt.Printf("== arm %s\n%s\n\n", arm, out)
+			body, err := measure.WireBody(p, req)
+			check(err)
+			var out bytes.Buffer
+			check(json.Indent(&out, body, "", "  "))
+			fmt.Printf("== arm %s (%s)\n%s\n\n", arm, p.Protocol, out.String())
 		}
 		fmt.Printf("dry run: %d arms x %d trials = %d requests to %s would be sent\n",
 			len(p.Arms), p.NPerArm, len(p.Arms)*p.NPerArm, p.Model)
@@ -68,12 +72,16 @@ func main() {
 		fail("MODEL_NAME=%s differs from the pre-registered model %s", name, p.Model)
 	}
 	base := os.Getenv("MODEL_BASE_URL")
-	client, err := measure.NewClient(base, key, p.AnthropicVersion) // refuses an unset base URL (D1b)
+	client, err := measure.NewClientFor(p, base, key) // refuses an unset base URL (D1b)
 	check(err)
 
 	root, err := filepath.Abs(filepath.Join(*dir, "..", ".."))
 	check(err)
-	if dirty := git(root, append([]string{"status", "--porcelain", "--"}, guarded...)...); dirty != "" {
+	expDir, err := filepath.Abs(*dir)
+	check(err)
+	expRel, err := filepath.Rel(root, expDir)
+	check(err)
+	if dirty := git(root, append([]string{"status", "--porcelain", "--", expRel}, guarded...)...); dirty != "" {
 		fail("uncommitted changes to the experiment or harness -- commit the design before running it:\n%s", dirty)
 	}
 	runs := filepath.Join(*dir, "runs")
@@ -90,7 +98,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	total := len(p.Arms) * p.NPerArm
-	fmt.Fprintf(os.Stderr, "measure: %d requests to %s at %s (commit %.12s)\n", total, p.Model, base, commit)
+	fmt.Fprintf(os.Stderr, "measure: %s -- %d requests to %s over %s at %s (commit %.12s)\n",
+		p.Experiment, total, p.Model, p.Protocol, base, commit)
 
 	sum, runErr := measure.Run(ctx, client, in, p, &progress{w: f, total: total}, key)
 	if err := f.Close(); err != nil && runErr == nil {
@@ -103,7 +112,8 @@ func main() {
 	}
 
 	summary := map[string]any{
-		"commit": commit, "run_file": filepath.Base(runPath), "model": p.Model, "effort": p.Effort,
+		"commit": commit, "run_file": filepath.Base(runPath), "experiment": p.Experiment, "protocol": p.Protocol,
+		"model": p.Model, "effort": p.Effort, "temperature": p.Temperature,
 		"anthropic_version": p.AnthropicVersion, "sampling": p.Sampling, "base_url": base,
 		"n_per_arm": p.NPerArm, "summary": sum, "completed": runErr == nil,
 	}
@@ -111,7 +121,7 @@ func main() {
 		summary["stopped"] = runErr.Error()
 	}
 	out, _ := json.MarshalIndent(summary, "", "  ")
-	if strings.Contains(string(out), key) { // the same exact-key check every run line gets
+	if measure.ContainsKey(out, key) { // the same exact-key check every run line gets
 		fail("refusing to write the summary: it contains MODEL_API_KEY")
 	}
 	check(os.WriteFile(filepath.Join(runs, stamp+".summary.json"), append(out, '\n'), 0o644))

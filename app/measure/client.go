@@ -3,7 +3,6 @@ package measure
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,15 +25,17 @@ import (
 type Client struct {
 	endpoint string
 	key      string
-	version  string
+	prereg   Prereg // the protocol, and how to encode for it
 	http     *http.Client
 	sleep    func(context.Context, time.Duration) error
 }
 
-// Reply is one HTTP exchange's evidence. Headers are not kept, except
-// the request id, which identifies the call to the provider.
+// Reply is one HTTP exchange's evidence: the exact body sent, and what
+// came back. Headers are not kept, except the request id, which
+// identifies the call to the provider.
 type Reply struct {
 	Status    int
+	Sent      []byte
 	Body      []byte
 	RequestID string
 }
@@ -55,6 +56,13 @@ const (
 // name: "localhost" is a string, and SR-B7-1's shape is a decision about
 // the address, not a string match.
 func NewClient(baseURL, key, version string) (*Client, error) {
+	return NewClientFor(Prereg{Protocol: ProtocolAnthropic, AnthropicVersion: version}, baseURL, key)
+}
+
+// NewClientFor builds a client for the pre-registered protocol. The key
+// rules are the protocol's business only in WHICH header carries the key;
+// where it may go is decided here, the same for both.
+func NewClientFor(p Prereg, baseURL, key string) (*Client, error) {
 	if key == "" {
 		return nil, fmt.Errorf("MODEL_API_KEY is empty")
 	}
@@ -77,12 +85,16 @@ func NewClient(baseURL, key, version string) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("MODEL_BASE_URL scheme %q: want https", u.Scheme)
 	}
+	path := "/v1/messages"
+	if p.Protocol == ProtocolOpenAIChat {
+		path = "/chat/completions" // MODEL_BASE_URL is the provider's .../v1
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	return &Client{
-		endpoint: u.String() + "/v1/messages",
+		endpoint: u.String() + path,
 		key:      key,
-		version:  version,
+		prereg:   p,
 		http: &http.Client{
 			Timeout:   10 * time.Minute,
 			Transport: transport,
@@ -120,10 +132,16 @@ func (r *retryable) Unwrap() error { return r.err }
 // retried: it is a broken request. On failure the last Reply is still
 // returned -- status, body and request id are the evidence.
 func (c *Client) Send(ctx context.Context, req Request) (Reply, error) {
-	body, err := json.Marshal(req)
+	body, err := encodeRequest(c.prereg, req)
 	if err != nil {
 		return Reply{}, err
 	}
+	r, err := c.attempts(ctx, body)
+	r.Sent = body
+	return r, err
+}
+
+func (c *Client) attempts(ctx context.Context, body []byte) (Reply, error) {
 	var last Reply
 	var lastErr error
 	for i := 0; i < attempts; i++ {
@@ -152,8 +170,12 @@ func (c *Client) once(ctx context.Context, body []byte) (Reply, error) {
 		return Reply{}, err
 	}
 	hreq.Header.Set("content-type", "application/json")
-	hreq.Header.Set("x-api-key", c.key)
-	hreq.Header.Set("anthropic-version", c.version)
+	if c.prereg.Protocol == ProtocolOpenAIChat {
+		hreq.Header.Set("authorization", "Bearer "+c.key)
+	} else {
+		hreq.Header.Set("x-api-key", c.key)
+		hreq.Header.Set("anthropic-version", c.prereg.AnthropicVersion)
+	}
 
 	resp, err := c.http.Do(hreq)
 	if err != nil {
@@ -168,6 +190,9 @@ func (c *Client) once(ctx context.Context, body []byte) (Reply, error) {
 		return Reply{}, &retryable{err: fmt.Errorf("reading response: %w", err), wait: 2 * time.Second}
 	}
 	r := Reply{Status: resp.StatusCode, Body: data, RequestID: resp.Header.Get("request-id")}
+	if r.RequestID == "" {
+		r.RequestID = resp.Header.Get("x-request-id") // OpenAI-style providers
+	}
 	if resp.StatusCode == http.StatusOK {
 		return r, nil
 	}

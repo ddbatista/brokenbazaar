@@ -67,11 +67,20 @@ type Inputs struct {
 // blank line, body (executor_vulnerable.go and gateway/gate.py).
 func (in Inputs) DocumentText() string { return in.DocumentTitle + "\n\n" + in.DocumentBody }
 
+// Wire protocols the harness speaks (TM D1; 03b added the second).
+const (
+	ProtocolAnthropic  = "anthropic-messages"
+	ProtocolOpenAIChat = "openai-chat"
+)
+
 // Prereg is the pre-registered design (preregistration.json).
 type Prereg struct {
+	Experiment       string   `json:"experiment"`
+	Protocol         string   `json:"protocol"` // "" means anthropic-messages (experiment 03)
 	Model            string   `json:"model"`
-	Effort           string   `json:"effort"`
-	AnthropicVersion string   `json:"anthropic_version"`
+	Effort           string   `json:"effort"`            // anthropic-messages only
+	AnthropicVersion string   `json:"anthropic_version"` // anthropic-messages only
+	Temperature      *float64 `json:"temperature"`       // openai-chat only: set, and non-zero (D1b)
 	MaxTokens        int      `json:"max_tokens"`
 	NPerArm          int      `json:"n_per_arm"`
 	Arms             []string `json:"arms"`
@@ -98,9 +107,29 @@ func LoadPrereg(path string) (Prereg, error) {
 	if err := loadJSON(path, &p); err != nil {
 		return p, err
 	}
+	if p.Protocol == "" {
+		p.Protocol = ProtocolAnthropic
+	}
+	switch p.Protocol {
+	case ProtocolAnthropic:
+		if p.Effort == "" || p.AnthropicVersion == "" {
+			return p, fmt.Errorf("%s: effort and anthropic_version are required for %s", path, p.Protocol)
+		}
+		if p.Temperature != nil {
+			// A 400 on anthropic-version 2026-10-21, on every model (TM D2).
+			return p, fmt.Errorf("%s: %s takes no temperature", path, p.Protocol)
+		}
+	case ProtocolOpenAIChat:
+		if p.Temperature == nil || *p.Temperature <= 0 {
+			// D1b: at temperature 0, n=20 is n=1 run twenty times.
+			return p, fmt.Errorf("%s: %s needs an explicit, non-zero temperature (D1b)", path, p.Protocol)
+		}
+	default:
+		return p, fmt.Errorf("%s: unknown protocol %q", path, p.Protocol)
+	}
 	switch {
-	case p.Model == "" || p.Effort == "" || p.AnthropicVersion == "":
-		return p, fmt.Errorf("%s: model, effort and anthropic_version are required", path)
+	case p.Experiment == "" || p.Model == "":
+		return p, fmt.Errorf("%s: experiment and model are required", path)
 	case p.MaxTokens <= 0:
 		return p, fmt.Errorf("%s: max_tokens must be positive", path)
 	case p.NPerArm < minN:
@@ -240,12 +269,15 @@ func Render(spans []agent.Span, in Inputs, p Prereg) (Request, error) {
 	if len(msgs) == 0 {
 		user(ContinueTurn)
 	}
-	return Request{
-		Model:        p.Model,
-		MaxTokens:    p.MaxTokens,
-		System:       strings.Join(system, "\n\n"),
-		Messages:     msgs,
-		Tools:        tools(),
-		OutputConfig: &OutputConfig{Effort: p.Effort},
-	}, nil
+	req := Request{
+		Model:     p.Model,
+		MaxTokens: p.MaxTokens,
+		System:    strings.Join(system, "\n\n"),
+		Messages:  msgs,
+		Tools:     tools(),
+	}
+	if p.Effort != "" {
+		req.OutputConfig = &OutputConfig{Effort: p.Effort}
+	}
+	return req, nil
 }
