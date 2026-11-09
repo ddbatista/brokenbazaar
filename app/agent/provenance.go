@@ -16,11 +16,16 @@ package agent
 // The asymmetry this produces between modes is deliberate, and is itself
 // measurable in T9: in hardened mode, turn 2 of finding 03 reports
 // ["user" "untrusted"]; in vulnerable mode the naive assembler has merged
-// the whole context into one system-labelled span, so this returns an
-// EMPTY list -- the agent's own telemetry recording, honestly, that the
-// build could not tell where its content came from. That difference is
-// the B4 2.1 bug visible as data, which is the point of having the
-// vulnerable mode log at all (D4's second writer).
+// the STORED transcript into one system-labelled span, so the user label
+// is gone -- but the document read during the run is appended as its own
+// untrusted tool span, so turn 2 reports ["untrusted"]. (This comment
+// said "an EMPTY list" until T9 measured it; empty is what a user-only
+// context gives.) That difference is the B4 2.1 bug visible as data,
+// which is the point of having the vulnerable mode log at all (D4's
+// second writer), and the surviving untrusted label is what T9's R1
+// detects on: TestNaiveLoopStillLabelsInRunToolResults pins it. Content
+// already stored before the run is invisible to R1 -- declared in
+// detections/agent_rules.py.
 func DerivedFrom(spans []Span) []string {
 	var out []string
 	seen := map[Origin]struct{}{}

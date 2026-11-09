@@ -333,6 +333,22 @@ def gateway_log(hardened: bool) -> str:
     return proc.stdout
 
 
+def audit_file(hardened: bool, name: str) -> str:
+    """One file of the shared audit volume, read in-container.
+
+    A file that does not exist YET reads as empty: agent.jsonl appears
+    only after the first vulnerable run, so a hardened-first stack has
+    none, and that is "no records", not a broken volume. Any other
+    failure to read is Operational.
+    """
+    path = f"/audit/{name}"
+    proc = _compose(["exec", "-T", "gateway", "sh", "-c",
+                     'if [ -e "$1" ]; then cat "$1"; fi', "sh", path], hardened)
+    if proc.returncode != 0:
+        raise Operational(f"cannot read {path}: " + proc.stderr[-400:])
+    return proc.stdout
+
+
 def peek_location(url: str):
     """GET url WITHOUT following a redirect. Returns (status, Location).
 
