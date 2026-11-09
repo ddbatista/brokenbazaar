@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 BASE_URL ?= http://localhost:8080
 
-.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks test-gateway-image faults leakscan agent verify-agent-builds verify-agent-images wait require-hardened-secrets
+.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks test-gateway-image faults leakscan agent verify-agent-builds verify-agent-images wait require-hardened-secrets test-detections
 DATABASE_URL ?= postgres://bazaar:bazaar@127.0.0.1:5432/bazaar?sslmode=disable
 
 help: ## Show this help
@@ -183,19 +183,24 @@ attack: ## Run the full attack suite in both modes
 	@echo ""
 	@echo "attack suite: both modes behaved as their mode demands"
 
-detect: ## Replay PoCs and measure detect vs. miss (both modes)
+detect: ## Replay PoCs and measure detect vs. miss (both modes; M1 API rule + M2 agent rules)
 	@echo "== VULNERABLE mode: detection replay =="
 	$(VULNERABLE_ENV) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory wait
 	python3 detections/replay.py --base-url $(BASE_URL)
+	python3 detections/replay_agent.py --base-url $(BASE_URL)
 	@echo ""
 	@echo "== HARDENED mode: detection replay (needs JWT_SECRET and TOOLS_SECRET) =="
 	@$(MAKE) --no-print-directory require-hardened-secrets
 	$(HARDENED_ENV) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory wait
 	python3 detections/replay.py --hardened --base-url $(BASE_URL)
+	python3 detections/replay_agent.py --hardened --base-url $(BASE_URL)
 	@echo ""
 	@echo "detection replay: both modes matched expectations"
+
+test-detections: ## Run the detection-rule and replay-judge tests (stdlib unittest, no stack)  (M1 T8, M2 T9)
+	python3 -m unittest discover -s detections -t detections -p 'test_*.py' -v
 
 clean: down ## Stop everything and prune build cache
 	docker builder prune -f

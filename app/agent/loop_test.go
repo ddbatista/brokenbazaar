@@ -139,8 +139,9 @@ func TestDerivedFrom(t *testing.T) {
 // rather than as a merged string -- and part of why D4 wanted a second
 // writer. The vulnerable build's own telemetry records an empty
 // derived_from: the agent cannot say where its content came from,
-// because the concatenation destroyed the per-span labels. T9 measures
-// exactly this difference.
+// because the concatenation destroyed the per-span labels. This holds
+// for the STORED transcript only; results read during the run keep
+// their label (TestNaiveLoopStillLabelsInRunToolResults).
 func TestNaiveAssemblerLosesProvenance(t *testing.T) {
 	msgs := oneFetchTranscript()
 
@@ -155,6 +156,37 @@ func TestNaiveAssemblerLosesProvenance(t *testing.T) {
 	}
 	if vulnerable == nil {
 		t.Fatal("empty provenance must marshal as [], never null")
+	}
+}
+
+// TestNaiveLoopStillLabelsInRunToolResults pins what the vulnerable
+// build's telemetry actually says about finding 03, which T9's R1 rule
+// (detections/agent_rules.py, untrusted-fetch) depends on. The naive
+// assembler merges the STORED transcript -- so a user-only context
+// reports [] -- but a document read DURING the run is appended as its
+// own untrusted tool span, so the exfiltration fetch on turn 2 reports
+// ["untrusted"]. The loss is the user label, not the untrusted one.
+// Found at T9 open: provenance.go's docstring claimed the turn-2 list
+// was empty, which would have made R1 blind in vulnerable mode.
+func TestNaiveLoopStillLabelsInRunToolResults(t *testing.T) {
+	sess := &fakeSessions{transcript: []store.Message{
+		{Role: store.MessageRoleUser, Origin: store.MessageOriginUser, Body: userAsk},
+	}}
+	exec := &fakeExecutor{res: Result{Text: poisonedDoc, Route: "unmediated"}}
+	loop := newTestLoop(exec, sess, nil)
+	loop.Assembler = &NaiveAssembler{}
+
+	if _, err := loop.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.calls) != 2 {
+		t.Fatalf("want read_document then http_fetch, got %d dispatches", len(exec.calls))
+	}
+	if got := exec.calls[0].DerivedFrom; len(got) != 0 {
+		t.Fatalf("turn 1 (user ask merged into the system span): want [], got %v", got)
+	}
+	if got := strings.Join(exec.calls[1].DerivedFrom, ","); got != "untrusted" {
+		t.Fatalf("turn 2 (the exfil fetch): want untrusted, got %q", got)
 	}
 }
 
