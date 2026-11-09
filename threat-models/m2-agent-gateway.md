@@ -75,6 +75,14 @@ The expected shape is `Arm B < Arm A` **and `Arm B > 0`**, and that second inequ
 
 **Temperature is a stated, non-zero, recorded parameter.** At temperature 0, n=20 is n=1 run twenty times: greedy decoding returns near-identical output and the confidence interval is theatre. Compliance is a rate over a distribution, so the experiment requires sampling, and `temperature` is written into every trial row beside model, arm and date.
 
+> **Amended 2026-11-09 at T-Measure (the build met the API, and the code).** Recorded here because D1b is where the requirements live. Full reasoning is in `experiments/03-injection-compliance/README.md` (TM D1–D7).
+>
+> - **Protocol:** the Anthropic Messages API, not "any OpenAI-compatible endpoint". It uses stdlib `net/http`, because the vendor SDK's default client reads ambient vendor credentials, which is requirement 1's primitive.
+> - **Requirement 2 strengthened:** a loopback *IP* only (`localhost` is a string match), and redirects are never followed. `net/http` forwards `x-api-key` across a redirect, which would carry the key past the HTTPS check.
+> - **Temperature:** it cannot be sent. On `anthropic-version: 2026-10-21` any sampling parameter is a 400, and Claude 4.7+ sample only at the default (1.0), which is non-zero. The harness records "API default" and *checks* that responses vary.
+> - **Requirement 3** is met by recording no headers at all, plus an exact-key check on every line written, rather than by the field-name `redact` package. There is no credential-named field to redact.
+> - **Two arms became three.** A document read during a run is appended as its own untrusted tool span in *both* builds, so the naive merge (B4 2.1) never reaches finding 03's document on the live path. Arm A splits into A-stored (the merge, as designed) and A-live (what the vulnerable binary actually sends).
+
 **D1c — results live in a new top-level `experiments/`, and the layout amendment is recorded rather than taken quietly.**
 
       experiments/
