@@ -36,12 +36,15 @@ import (
 const systemPrompt = "You are the BrokenBazaar assistant. Answer the user's question using the documents available to you."
 
 func main() {
-	sessionID := flag.String("session", "", "agent session id to run")
+	sessionID := flag.String("session", "", "existing agent session id to run")
 	orgID := flag.String("org", "", "org the session belongs to")
+	actingFor := flag.String("acting-for", "", "open a FRESH session on behalf of this user id (with -message)")
+	message := flag.String("message", "", "the user's request that starts a fresh session (with -acting-for)")
 	flag.Parse()
 
-	if *sessionID == "" || *orgID == "" {
-		log.Fatal("agent: -session and -org are both required (see `make seed` output)")
+	tgt, err := parseTarget(*orgID, *sessionID, *actingFor, *message)
+	if err != nil {
+		log.Fatalf("agent: %v", err)
 	}
 
 	// M2-N4 / T6 D2: the compiled mode must match the stack's mode, or
@@ -78,13 +81,24 @@ func main() {
 	// Fail loudly on a session that does not exist or belongs to
 	// another org -- GetSession cannot tell those apart by design
 	// (SR-M1-4), and neither can this message.
-	orgStore := store.ForOrg(pool, *orgID)
-	sess, ok, err := orgStore.GetSession(ctx, *sessionID)
-	if err != nil {
-		log.Fatalf("agent: %v", err)
-	}
-	if !ok {
-		log.Fatalf("agent: no session %s in org %s", *sessionID, *orgID)
+	orgStore := store.ForOrg(pool, tgt.orgID)
+	var sess store.Session
+	if tgt.fresh() {
+		// T7 D1: a fresh session per run, so an attack is observed on
+		// a transcript no earlier run has touched.
+		sess, err = openFresh(ctx, pool, tgt)
+		if err != nil {
+			log.Fatalf("agent: opening a fresh session: %v", err)
+		}
+	} else {
+		var ok bool
+		sess, ok, err = orgStore.GetSession(ctx, tgt.sessionID)
+		if err != nil {
+			log.Fatalf("agent: %v", err)
+		}
+		if !ok {
+			log.Fatalf("agent: no session %s in org %s", tgt.sessionID, tgt.orgID)
+		}
 	}
 
 	// D4's second writer, build-tag selected: nil in hardened builds
@@ -102,10 +116,10 @@ func main() {
 		Model:     &agent.ScriptedModel{},
 		Executor: agent.NewExecutor(agent.ExecutorConfig{
 			Pool:      pool,
-			OrgID:     *orgID,
+			OrgID:     tgt.orgID,
 			SessionID: sess.ID,
 		}),
-		Sessions:     store.ForSession(pool, *orgID, sess.ID),
+		Sessions:     store.ForSession(pool, tgt.orgID, sess.ID),
 		SystemPrompt: systemPrompt,
 		// T5: the platform context every dispatch and audit record
 		// carries -- set once from the session row, never from anything

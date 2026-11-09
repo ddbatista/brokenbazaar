@@ -20,7 +20,10 @@ CONTRACT (T7 depends on it; settled in T6):
     GET    /received          {"received": [record, ...]}  oldest first
     DELETE /received          clears the record; 204
 
-A record is {method, path, query, params, body, host}. `query` is the raw
+A record is {seq, method, path, query, params, body, host}. `seq` counts
+every recorded request since the collector started and never repeats --
+exploits window their receipts by it, because the record is capped and
+at the cap its LENGTH stops moving (found at T7 review). `query` is the raw
 string as it arrived; `params` is it decoded, so the PoC can assert on
 the tenant's bytes as they appear in the document. /received is never
 itself recorded. At most MAX_RECORDS are kept, oldest dropped first.
@@ -51,10 +54,12 @@ class _Store:
     def __init__(self, max_records):
         self._lock = threading.Lock()
         self._records = deque(maxlen=max_records)
+        self._seq = 0
 
     def add(self, record):
         with self._lock:
-            self._records.append(record)
+            self._seq += 1
+            self._records.append({"seq": self._seq, **record})
 
     def snapshot(self):
         with self._lock:

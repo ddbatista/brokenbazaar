@@ -59,14 +59,19 @@ def run_one(d, mode, base_url):
 
     want = expected[mode]
     other = expected["hardened" if mode == "vulnerable" else "vulnerable"]
+    # A finding may declare a longer budget: the agent exploits (03, 04)
+    # build an image and run several one-shot containers, which a cold CI
+    # runner cannot do in the API exploits' 120s (T7 review). Declared in
+    # the finding's own expected.json, so the budget is reviewed with it.
+    timeout = expected.get("timeout_s", EXPLOIT_TIMEOUT_S)
 
     try:
         proc = subprocess.run(
             [sys.executable, str(d / "exploit.py"), "--base-url", base_url],
-            capture_output=True, text=True, timeout=EXPLOIT_TIMEOUT_S,
+            capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return False, f"exploit timed out after {EXPLOIT_TIMEOUT_S}s (operational)"
+        return False, f"exploit timed out after {timeout}s (operational)"
 
     problems = []
     if proc.returncode != want["exit_code"]:
