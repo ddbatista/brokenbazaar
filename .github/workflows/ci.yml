@@ -78,6 +78,9 @@ jobs:
       - name: attack helpers, leak scan and fault judges
         run: make test-attacks
 
+      - name: detection rules and replay judge
+        run: make test-detections
+
       - name: D5 -- the hardened agent binary holds no tool code
         run: make verify-agent-builds
 
@@ -131,6 +134,14 @@ jobs:
           run: |
             JWT_SECRET=ci-only-not-a-secret TOOLS_SECRET=ci-only-not-a-secret-either make harden
             cd attacks && ./run.py --mode hardened --base-url http://localhost:8080
+
+        - name: detection replay -- every detect/miss cell as measured (M1 + M2)
+          # Flips the stack itself: vulnerable, then hardened, replaying M1's
+          # API scenarios and M2's agent scenarios and asserting each cell.
+          # Ends HARDENED, which the leak scan and the faults below expect,
+          # and before the leak scan so it also scans these runs' records.
+          run: |
+            JWT_SECRET=ci-only-not-a-secret TOOLS_SECRET=ci-only-not-a-secret-either make detect
 
         - name: MCP01 -- no platform secret or JWT in any audit store
           # After BOTH suites: the stores now hold vulnerable and hardened
