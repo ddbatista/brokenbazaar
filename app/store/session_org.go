@@ -20,22 +20,33 @@ import (
 // backstop -- a caller that forgets the check gets a loud constraint
 // error, never a silently inconsistent session.
 //
+// scope is the list of tools the session may request (plan M3 T2 D1,
+// SR-B3-5: explicitly requested). It is stored exactly as given and never
+// updated -- no method here or anywhere can change it (SR-B3-6). A nil
+// scope is UNSTATED, and pgx sends it as NULL, which the column's NOT
+// NULL refuses loudly; an empty, non-nil scope is a stated "nothing",
+// which is allowed and denies every tool. Scope is consent, not
+// authority (m3-delegation.md M3-N5): nothing here checks it against the
+// user's role. Nothing reads it before T6 either; until then it is
+// recorded, like expires_at was in M2.
+//
 // expiresAt is recorded, not enforced (D7, no quiet partial fixes):
 // nothing in M2 consults it before acting. Time-bounding as SR-B3-4
-// constrains it is violated-by-design and lands in M3; the column exists
-// so M3's enforcement has real data to measure against.
-func (s *OrgStore) CreateSession(ctx context.Context, actingFor string, expiresAt time.Time) (Session, error) {
+// constrains it is violated-by-design and lands in M3 (T6); the column
+// exists so that enforcement has real data to measure against.
+func (s *OrgStore) CreateSession(ctx context.Context, actingFor string, scope []string, expiresAt time.Time) (Session, error) {
 	sess := Session{
 		ID:        NewID(),
 		OrgID:     s.orgID, // never taken from the caller (SR-B2-6 shape)
 		ActingFor: actingFor,
+		Scope:     scope,
 		ExpiresAt: expiresAt,
 	}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO sessions (id, org_id, acting_for, expires_at)
-		 VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+		`INSERT INTO sessions (id, org_id, acting_for, scope, expires_at)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5)
 		 RETURNING created_at`,
-		sess.ID, s.orgID, actingFor, expiresAt,
+		sess.ID, s.orgID, actingFor, scope, expiresAt,
 	).Scan(&sess.CreatedAt)
 	if err != nil {
 		return Session{}, fmt.Errorf("store: creating session for user %s in org %s: %w", actingFor, s.orgID, err)
@@ -54,10 +65,10 @@ func (s *OrgStore) GetSession(ctx context.Context, id string) (Session, bool, er
 		actingFor string
 	)
 	err := s.pool.QueryRow(ctx,
-		`SELECT id::text, org_id::text, acting_for::text, created_at, expires_at
+		`SELECT id::text, org_id::text, acting_for::text, scope, created_at, expires_at
 		 FROM sessions WHERE id = $1::uuid AND org_id = $2::uuid`,
 		id, s.orgID,
-	).Scan(&sess.ID, &orgID, &actingFor, &sess.CreatedAt, &sess.ExpiresAt)
+	).Scan(&sess.ID, &orgID, &actingFor, &sess.Scope, &sess.CreatedAt, &sess.ExpiresAt)
 	if err != nil {
 		if isNoRows(err) {
 			return Session{}, false, nil

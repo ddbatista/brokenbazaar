@@ -27,7 +27,8 @@ def alert(rule, session="s1"):
 
 INJECTION = rp.Scenario("03 injection", lambda docs: "m", calls={"read_document", "http_fetch"},
                         expect={False: {R1, R2}, True: {R1, R2}},
-                        deny_only={False: False, True: True}, attack=True)
+                        deny_only={False: False, True: True}, attack=True,
+                        scope=("read_document", "http_fetch"))
 
 
 def judge(hardened=False, grew=None, alerts=(), baseline=(), session="s1",
