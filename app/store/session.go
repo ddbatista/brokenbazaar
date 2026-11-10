@@ -62,10 +62,16 @@ const (
 // resolved at creation and never re-derived -- violated by design, with
 // M3 owning the redesign (m2-agent-gateway.md D7). ExpiresAt ships for
 // hygiene only: nothing in M2 consults it before acting.
+//
+// Scope (plan M3 T2 D1) is the tools the session was created to request, stated
+// explicitly by its creator and fixed for its life. It narrows; it never
+// authorizes -- the role leg does that per action (m3-delegation.md D4,
+// M3-N5). Recorded from T2, consulted from T6.
 type Session struct {
 	ID        string
 	OrgID     string
 	ActingFor string
+	Scope     []string
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }

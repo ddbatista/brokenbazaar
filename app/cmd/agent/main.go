@@ -40,9 +40,10 @@ func main() {
 	orgID := flag.String("org", "", "org the session belongs to")
 	actingFor := flag.String("acting-for", "", "open a FRESH session on behalf of this user id (with -message)")
 	message := flag.String("message", "", "the user's request that starts a fresh session (with -acting-for)")
+	scope := flag.String("scope", "", "comma-separated tools a FRESH session may request, e.g. read_document,http_fetch (with -acting-for)")
 	flag.Parse()
 
-	tgt, err := parseTarget(*orgID, *sessionID, *actingFor, *message)
+	tgt, err := parseTarget(*orgID, *sessionID, *actingFor, *message, *scope)
 	if err != nil {
 		log.Fatalf("agent: %v", err)
 	}

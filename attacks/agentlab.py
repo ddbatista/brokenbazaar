@@ -303,21 +303,54 @@ def _compose(args, hardened: bool, timeout=DOCKER_TIMEOUT_S):
 _built_for = set()  # modes whose agent image this process already built
 
 
-def run_agent(hardened: bool, org_id: str, acting_for: str, message: str) -> AgentRun:
+def check_scope(scope) -> tuple[str, ...]:
+    """The session scope as the agent will store it, or ValueError.
+
+    The same rules as the agent's own parseScope (app/cmd/agent/target.go),
+    applied here so a bad scope fails fast and locally instead of after
+    docker has started a container: non-empty, no blank or padded name, no
+    name twice, no comma inside a name (the agent would split it in two).
+    A bare str is refused outright -- `SCOPE = ("http_fetch")`, a missing
+    comma, would otherwise iterate into one "tool" per character.
+    """
+    if isinstance(scope, str):
+        raise ValueError(f"scope must be a sequence of tool names, not the string {scope!r}")
+    scope = tuple(scope)
+    if not scope:
+        raise ValueError("scope is empty: a fresh session states the tools it may request (SR-B3-5)")
+    for tool in scope:
+        if not isinstance(tool, str) or not tool.strip() or tool != tool.strip() or "," in tool:
+            raise ValueError(f"scope entry {tool!r} is not a plain tool name")
+    if len(set(scope)) != len(scope):
+        raise ValueError(f"scope names a tool twice: {scope!r}")
+    return scope
+
+
+def run_agent(hardened: bool, org_id: str, acting_for: str, message: str,
+              scope: tuple[str, ...]) -> AgentRun:
     """Open a FRESH session for the user's request and run it (T7 D1).
+
+    `scope` is the tools the session may request (plan M3 T2 D4). It has no
+    default: SR-B3-5 says a session's scope is explicitly requested, and
+    each exploit requests what its flow needs (m3-delegation.md D7), so
+    the M2 findings keep asserting their own denial reasons once T6 makes
+    scope a leg. A scope the agent would refuse is refused here, before
+    docker (check_scope).
 
     Returns the parsed run. An agent that never printed its session
     header refused to start -- Operational, with its stderr. The image is
     built once per mode per exploit run: a cold build is the slow step,
     and run.py's budget is per exploit (expected.json `timeout_s`).
     """
+    scope = check_scope(scope)
     if hardened not in _built_for:
         built = _compose(["--profile", "agent", "build", "agent"], hardened, timeout=300)
         if built.returncode != 0:
             raise Operational("building the agent image failed:\n" + built.stderr[-800:])
         _built_for.add(hardened)
     proc = _compose(["--profile", "agent", "run", "--rm", "--no-deps", "agent",
-                     "-org", org_id, "-acting-for", acting_for, "-message", message], hardened)
+                     "-org", org_id, "-acting-for", acting_for, "-message", message,
+                     "-scope", ",".join(scope)], hardened)
     run = parse_agent_stdout(proc.stdout)
     run.stderr, run.returncode = proc.stderr, proc.returncode
     if not run.session_id:
@@ -372,10 +405,12 @@ def peek_location(url: str):
     return resp.status, resp.getheader("Location", "")
 
 
-def ask(hardened: bool, org: str, user: str, message: str, who: str) -> AgentRun:
+def ask(hardened: bool, org: str, user: str, message: str, who: str,
+        scope: tuple[str, ...]) -> AgentRun:
     """Run one request in a fresh session and say what happened."""
-    print(f"   {who} asks the agent: {message!r}")
-    run = run_agent(hardened, org, user, message)
+    scope = check_scope(scope)  # before printing it, so a bad one is never shown as if used
+    print(f"   {who} asks the agent: {message!r}  (session scope: {', '.join(scope)})")
+    run = run_agent(hardened, org, user, message, scope)
     print(f"   fresh session {run.session_id}  build={run.build}  tools={run.tools or 'none'}")
     if run.stopped:
         print(f"   agent stopped: {run.stopped}")

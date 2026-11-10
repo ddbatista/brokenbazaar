@@ -197,5 +197,73 @@ class RunMain(unittest.TestCase):
         self.assertEqual(ctx.exception.code, agentlab.EXIT_OPERATIONAL)
 
 
+class RunAgentScope(unittest.TestCase):
+    """Plan M3 T2 D4: every fresh session states the tools it may request.
+
+    The scope is passed to the agent as -scope, in the order given, and a
+    run with no scope is refused before docker is touched -- there is no
+    default, because SR-B3-5 says the scope is explicitly requested.
+    """
+
+    def setUp(self):
+        self.calls = []
+        self._saved = agentlab._compose, set(agentlab._built_for)
+
+        class Done:
+            returncode, stderr = 0, ""
+            stdout = VULN_STDOUT
+
+        def fake(args, hardened, timeout=120):
+            self.calls.append(args)
+            return Done()
+
+        agentlab._compose = fake
+        agentlab._built_for.update({True, False})  # skip the image build
+
+    def tearDown(self):
+        agentlab._compose = self._saved[0]
+        agentlab._built_for.clear()
+        agentlab._built_for.update(self._saved[1])
+
+    def test_the_scope_reaches_the_agent_as_a_flag(self):
+        agentlab.run_agent(False, "o-1", "u-1", "hi", ("read_document", "http_fetch"))
+        (args,) = self.calls
+        i = args.index("-scope")
+        self.assertEqual(args[i + 1], "read_document,http_fetch")
+
+    def test_no_scope_is_refused_before_docker(self):
+        for empty in ((), []):
+            with self.assertRaises(ValueError):
+                agentlab.run_agent(False, "o-1", "u-1", "hi", empty)
+        self.assertEqual(self.calls, [])
+
+    def test_a_tool_name_with_a_comma_is_refused(self):
+        # It would split into two tools on the agent's side: the list the
+        # agent stored would silently differ from the one asked for.
+        with self.assertRaises(ValueError):
+            agentlab.run_agent(False, "o-1", "u-1", "hi", ("read_document,http_fetch",))
+        self.assertEqual(self.calls, [])
+
+    def test_the_same_rules_as_the_agent_are_applied_before_docker(self):
+        # The agent's parseScope refuses these too, but only after docker
+        # has started a container; refusing here keeps the two checks one
+        # rule set, and the failure fast and local.
+        for bad in (("read_document", "read_document"),  # named twice
+                    ("  ",),                               # blank name
+                    (" read_document",)):                  # would be trimmed into a different name
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                agentlab.run_agent(False, "o-1", "u-1", "hi", bad)
+        self.assertEqual(self.calls, [])
+
+    def test_a_bare_string_is_not_a_scope(self):
+        # SCOPE = ("http_fetch") -- a missing comma -- is a str, which
+        # would iterate into one "tool" per character.
+        with self.assertRaises(ValueError):
+            agentlab.run_agent(False, "o-1", "u-1", "hi", "http_fetch")
+        with self.assertRaises(ValueError):
+            agentlab.ask(False, "o-1", "u-1", "hi", "victim", "http_fetch")
+        self.assertEqual(self.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
-// Command seed populates three orgs, one user per role per org, and
-// documents per org -- and, since M2, a revenue document, two agent
-// sessions and their opening messages per org.
+// Command seed populates three orgs, one user per role per org (plus two
+// role-mutation subjects in Acme, since M3), and documents per org -- and,
+// since M2, a revenue document, two agent sessions and their opening
+// messages per org.
 //
 // SR-M1-2: this seed is a security control, not a fixture. It creates
 // Org/User/Membership rows through AdminStore (direct SQL is fine there --
@@ -16,6 +17,14 @@
 // OrgStore.CreateSession, every message through ForSession. The paved
 // road is the only road for the new tables too, including their very
 // first rows.
+//
+// M3 (T2) adds two Acme users that exist only for the exploits that
+// CHANGE roles, so no other exploit's principal is ever mutated:
+// deputy@acme.example (an admin, demoted by 05's variant ii) and
+// mallory@acme.example (a member, who plants 06's document). Acme's
+// original admin is the org OWNER no exploit changes: it is the actor
+// for every role reset (m3-delegation.md §7, attacks/README.md rule 5).
+// Every seeded session now states its scope (SR-B3-5).
 package main
 
 import (
@@ -35,10 +44,21 @@ type seedOrg struct {
 	users []seedUser
 }
 
+// m2SessionScope is what the two M2 sessions per org request: finding
+// 03's flow reads a document, then fetches (m3-delegation.md D7 -- each
+// PoC's session requests the scope it needs, so the M2 findings keep
+// asserting their own denial reasons once T6 makes scope a leg).
+var m2SessionScope = []string{"read_document", "http_fetch"}
+
 type seedUser struct {
 	email       string
 	displayName string
 	role        store.Role
+	// mutationSubject marks a user that exists only for the exploits
+	// that CHANGE roles (plan M3 T2 D3). Such a user never becomes the
+	// author or the acting user of the M1/M2 fixtures below -- stated
+	// per user rather than inferred from list order.
+	mutationSubject bool
 }
 
 // password is the same for every seeded user -- it is a lab, not a product,
@@ -63,25 +83,29 @@ func seedData() []seedOrg {
 		{
 			name: "Acme Corp",
 			users: []seedUser{
-				{"admin@acme.example", "Acme Admin", store.RoleAdmin},
-				{"member@acme.example", "Acme Member", store.RoleMember},
-				{"viewer@acme.example", "Acme Viewer", store.RoleViewer},
+				{"admin@acme.example", "Acme Admin", store.RoleAdmin, false},
+				{"member@acme.example", "Acme Member", store.RoleMember, false},
+				{"viewer@acme.example", "Acme Viewer", store.RoleViewer, false},
+				// Plan M3 T2 D3: the role-mutation subjects. Appended, so
+				// the first three keep their M1 order.
+				{"deputy@acme.example", "Acme Deputy Admin", store.RoleAdmin, true},
+				{"mallory@acme.example", "Mallory (Acme member)", store.RoleMember, true},
 			},
 		},
 		{
 			name: "Globex",
 			users: []seedUser{
-				{"admin@globex.example", "Globex Admin", store.RoleAdmin},
-				{"member@globex.example", "Globex Member", store.RoleMember},
-				{"viewer@globex.example", "Globex Viewer", store.RoleViewer},
+				{"admin@globex.example", "Globex Admin", store.RoleAdmin, false},
+				{"member@globex.example", "Globex Member", store.RoleMember, false},
+				{"viewer@globex.example", "Globex Viewer", store.RoleViewer, false},
 			},
 		},
 		{
 			name: "Initech",
 			users: []seedUser{
-				{"admin@initech.example", "Initech Admin", store.RoleAdmin},
-				{"member@initech.example", "Initech Member", store.RoleMember},
-				{"viewer@initech.example", "Initech Viewer", store.RoleViewer},
+				{"admin@initech.example", "Initech Admin", store.RoleAdmin, false},
+				{"member@initech.example", "Initech Member", store.RoleMember, false},
+				{"viewer@initech.example", "Initech Viewer", store.RoleViewer, false},
 			},
 		},
 	}
@@ -126,6 +150,12 @@ func main() {
 				log.Fatalf("seed: %v", err)
 			}
 			fmt.Printf("  user  %-28s %-8s %s\n", u.Email, su.role, u.ID)
+			// The M1/M2 fixtures below are authored by the org's admin
+			// (the owner) and act for its member (finding 03's victim).
+			// M3's mutation subjects never take those parts.
+			if su.mutationSubject {
+				continue
+			}
 			if su.role == store.RoleAdmin {
 				adminUserID = u.ID
 			}
@@ -182,14 +212,14 @@ func main() {
 		fmt.Printf("  doc   %-40s %s\n", revenueDoc.Title, revenueDoc.ID)
 
 		// expires_at is hygiene only (D7): nothing in M2 consults it
-		// before acting -- recorded, never enforced, until M3.
+		// before acting -- recorded, never enforced, until M3 T6.
 		const sessionLifetime = time.Hour
 
-		revenueSess, err := docStore.CreateSession(ctx, memberUserID, time.Now().Add(sessionLifetime))
+		revenueSess, err := docStore.CreateSession(ctx, memberUserID, m2SessionScope, time.Now().Add(sessionLifetime))
 		if err != nil {
 			log.Fatalf("seed: %v", err)
 		}
-		controlSess, err := docStore.CreateSession(ctx, memberUserID, time.Now().Add(sessionLifetime))
+		controlSess, err := docStore.CreateSession(ctx, memberUserID, m2SessionScope, time.Now().Add(sessionLifetime))
 		if err != nil {
 			log.Fatalf("seed: %v", err)
 		}
