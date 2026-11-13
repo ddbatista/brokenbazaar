@@ -121,14 +121,16 @@ var (
 // If the user has zero or more than one membership this returns an error
 // rather than guessing. Multi-org login -- one person choosing which of
 // several orgs to act as at token-issue time -- is out of scope for M1 and
-// deferred, the same way the threat-model diff defers SR-B1-6 (rate limiting)
-// and SR-M1-5 (the org_id claim): named here in writing rather than silently
-// not handled. It lands with the session work in M3, where "principal"
-// becomes a type rather than a word.
+// deferred, the same way the threat-model diff deferred SR-B1-6 (rate
+// limiting): named here in writing rather than silently not handled.
+// (SR-M1-5, the org_id claim, was deferred alongside it and landed in M3 T3:
+// hardened tokens no longer carry org_id or role.)
 //
-// This is a server-side lookup against records the API owns (SR-B2-2): the
-// org binding on the issued token derives from the memberships table, never
-// from anything the caller supplied.
+// This is a server-side lookup against records the API owns (SR-B2-2). The
+// issuer calls it in both modes, so no user without a membership is issued a
+// token; the vulnerable token copies its result into org_id and role, and the
+// hardened token carries neither. Hardened GET /me calls it too, to report
+// the caller's org and role from these records rather than from claims.
 func (s *AdminStore) SoleMembership(ctx context.Context, userID string) (orgID string, role Role, err error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT org_id::text, role FROM memberships WHERE user_id = $1::uuid`,

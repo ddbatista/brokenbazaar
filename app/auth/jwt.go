@@ -31,16 +31,23 @@ const (
 	alg      = "HS256"
 )
 
-// Claims is D3's exact claim set, no more and no less. Note org_id: it is
+// Claims is M1 D3's claim set: what the vulnerable issuer mints, and the
+// most any token may carry. Note org_id: it is
 // here because a real implementation puts it in the token to avoid a
 // membership lookup per request -- and that convenience is the entire
 // substrate of finding 02 (see M1-N5). The hardened request path resolves the
 // acting org by server-side membership lookup (SR-B2-2) and does not trust
-// this field; it is minted honestly (SR-B1-4) and must simply not be believed.
+// this field.
+//
+// Since M3 T3 (SR-M1-5, "a claim that must not be trusted should not be
+// present"), the hardened issuer leaves OrgID and Role empty, and omitempty
+// drops an empty claim from the payload entirely: absent, not "". The
+// vulnerable issuer still mints both, because finding 02's bug is believing
+// org_id and the vulnerable path reads role from the token.
 type Claims struct {
 	Sub   string `json:"sub"`
-	OrgID string `json:"org_id"`
-	Role  string `json:"role"`
+	OrgID string `json:"org_id,omitempty"`
+	Role  string `json:"role,omitempty"`
 	Iss   string `json:"iss"`
 	Iat   int64  `json:"iat"`
 	Exp   int64  `json:"exp"`

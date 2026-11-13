@@ -8,6 +8,12 @@ The product logs every authz denial in **both** modes (T5):
 
     2026/10/20 03:20:47 authz: deny sub=<uuid> target_org=<uuid> decision=not-a-member
 
+Since M3 T3 the API also logs a **second, different** denial, in both modes: a member whose role does not permit the action (403):
+
+    2026/11/13 22:42:47 authz: deny sub=<uuid> org=<uuid> decision=role-does-not-permit role="viewer" action=delete
+
+Its org field is `org=`, not `target_org=`, **on purpose**. This rule reads `target_org=` as "an org this principal is probing from outside" and alerts on a sweep across orgs. A member refused inside their *own* org is a different signal: capability escalation, which M3 T10 owns. If the formats matched, this rule would count role denials as cross-tenant probes. So `DENY_RE` does not match the new line, and nothing alerts on it until T10.
+
 The rule (`rule.py`, pure function, unit-tested in `test_rule.py`): alert when one principal accumulates **≥ 5 denials**. Per-principal, deliberately not per (principal, org) pair — a per-pair threshold would let an attacker spread 4 probes across every org and stay silent forever. Alert carries its evidence: sub, count, distinct target orgs, a sample line.
 
 `make detect` replays the PoCs against the live stack in both modes and asserts the full detect/miss matrix (`replay.py`):
