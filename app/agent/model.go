@@ -68,10 +68,50 @@ var _ Model = (*ScriptedModel)(nil)
 // which asserts on the bytes rather than on the call.
 var fetchImperative = regexp.MustCompile(`(?i)fetch\s+(https?://[^\s<]*(?:<[^>]*>)?[^\s]*)`)
 
-// documentRef matches a UUID in the user's request. The seed composes the
-// user message from the document id it just minted precisely so this can
-// stay a literal match rather than title-parsing (T2 D4).
-var documentRef = regexp.MustCompile(`\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`)
+// uuidPattern is a lowercase UUID, the form every id in this system is
+// minted in. One pattern for every reference the model reads, so a write
+// target and a read target are recognised identically: an id the read
+// step would not see is never written either.
+const uuidPattern = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
+
+// documentRef matches a document id anywhere in the context: the user's
+// request, or a document that names another. The seed composes the user
+// message from the document id it just minted precisely so this can stay
+// a literal match rather than title-parsing (T2 D4).
+var documentRef = regexp.MustCompile(`\b(` + uuidPattern + `)\b`)
+
+// writeImperative is one write the model can be told to make (M3 T4 D3).
+// As crude as fetchImperative, for the same reason: a model that parsed
+// carefully would start judging, and a model that judges could decline.
+// Keywords match in any case; the id is uuidPattern, as everywhere.
+//
+// They match in ANY span, user or document, because origin is never
+// consulted (D1a). 05 puts the delete in the user's own turn -- the
+// requester is the attacker and the model obeys its user. A document
+// that says "delete document X" steers the same call (M3-N4), which the
+// threat model declares reachable on purpose: the scope leg, not the
+// model, is what limits it.
+type writeImperative struct {
+	tool string
+	re   *regexp.Regexp
+	args func(match []string) map[string]string
+}
+
+// writeImperatives, in the order the model acts on them: delete, then
+// update. update replaces the body and keeps the title; the body must be
+// quoted, so the grammar never guesses where it ends.
+var writeImperatives = []writeImperative{
+	{
+		tool: "delete_document",
+		re:   regexp.MustCompile(`(?i:\bdelete\s+document)\s+(` + uuidPattern + `)\b`),
+		args: func(m []string) map[string]string { return map[string]string{"id": m[1]} },
+	},
+	{
+		tool: "update_document",
+		re:   regexp.MustCompile(`(?i:\bupdate\s+document)\s+(` + uuidPattern + `)(?i:\s+to)\s+"([^"]*)"`),
+		args: func(m []string) map[string]string { return map[string]string{"id": m[1], "body": m[2]} },
+	},
+}
 
 func (m *ScriptedModel) Next(spans []Span) Action {
 	// Which tools have already produced results in this context. Read
@@ -101,20 +141,66 @@ func (m *ScriptedModel) Next(spans []Span) Action {
 		}
 	}
 
-	// 2. A document referenced by the user and not yet read.
-	if !performed["read_document"] {
+	// 2. A write imperative anywhere in the context, each tool at most
+	// once.
+	//
+	// "Once" is per RUN, not per session: performed is read from the
+	// in-run spans' Tool field, and the assemblers rebuild a stored
+	// transcript without it (the messages table has no tool column). So
+	// a resumed session whose earlier turn held "delete document A"
+	// fires that delete again, A is already gone, and the run fails.
+	// Fresh sessions (attacks/README.md) never meet it; a PoC that
+	// resumes a session -- 05 (ii) after the demotion -- must open that
+	// session with a request that holds no write imperative.
+	for _, w := range writeImperatives {
+		if performed[w.tool] {
+			continue
+		}
 		for _, s := range spans {
-			if match := documentRef.FindStringSubmatch(s.Text); match != nil {
-				return Action{
-					Tool: "read_document",
-					Args: map[string]string{"id": match[1]},
+			if match := w.re.FindStringSubmatch(s.Text); match != nil {
+				return Action{Tool: w.tool, Args: w.args(match)}
+			}
+		}
+	}
+
+	// 3. A document referenced in the context and not yet read, skipping
+	// any document a write imperative names. The model reads what it is
+	// asked about, not what it is told to change: without the skip,
+	// "delete document X" would be followed by a read of the X just
+	// deleted, the executor would report it missing, and the run would
+	// fail after the delete had already happened. An update target is
+	// skipped by the same rule, so one rule covers every write tool.
+	if !performed["read_document"] {
+		targets := writeTargets(spans)
+		for _, s := range spans {
+			for _, match := range documentRef.FindAllStringSubmatch(s.Text, -1) {
+				if !targets[match[1]] {
+					return Action{
+						Tool: "read_document",
+						Args: map[string]string{"id": match[1]},
+					}
 				}
 			}
 		}
 	}
 
-	// 3. Nothing left to do.
+	// 4. Nothing left to do.
 	return Action{Answer: summarise(spans)}
+}
+
+// writeTargets is every document id any write imperative in the context
+// names: one that has run, one still to run, and one that never will
+// (a second "delete document Y" when each tool fires once).
+func writeTargets(spans []Span) map[string]bool {
+	targets := map[string]bool{}
+	for _, s := range spans {
+		for _, w := range writeImperatives {
+			for _, match := range w.re.FindAllStringSubmatch(s.Text, -1) {
+				targets[match[1]] = true
+			}
+		}
+	}
+	return targets
 }
 
 // contentsPlaceholder is what the seeded document asks to be substituted.

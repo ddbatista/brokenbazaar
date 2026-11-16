@@ -29,8 +29,13 @@ import (
 // which both this type and the hardened path are reachable.
 //
 // DO NOT "fix" anything here -- it is the deliverable (AGENTS.md). The
-// hardened implementations are gateway/tools/fetch.py and
-// gateway/tools/documents.py, written first, per the house rule.
+// hardened implementations of M2's two tools are gateway/tools/fetch.py
+// and gateway/tools/documents.py, written first, per the house rule.
+// M3's write tools are the departure from that rule, recorded in the
+// plan's T4 entry: their hardened path (gateway -> authority route ->
+// internal route, threat-model D4) lands in T6. What exists first is
+// the design (m3-delegation.md D3/D4) and the permission table it calls
+// (app/authz, T3).
 type NaiveExecutor struct {
 	cfg ExecutorConfig
 }
@@ -72,9 +77,14 @@ func NewAgentAudit() (*AgentAudit, error) {
 // arguments are never looked at. http_fetch is permitted, so every URL
 // is permitted. It passes code review ("we validate the tool name")
 // and constrains nothing an attacker cares about.
+//
+// M3 T4 adds the two write tools on the same terms. The check still
+// knows names only: not the requester's role, not the session's scope.
 var naiveAllowedTools = map[string]bool{
-	"read_document": true,
-	"http_fetch":    true,
+	"read_document":   true,
+	"http_fetch":      true,
+	"update_document": true,
+	"delete_document": true,
 }
 
 func (e *NaiveExecutor) Execute(ctx context.Context, a Action, _ CallContext) (Result, error) {
@@ -91,6 +101,14 @@ func (e *NaiveExecutor) Execute(ctx context.Context, a Action, _ CallContext) (R
 		return e.readDocument(ctx, a.Args["id"])
 	case "http_fetch":
 		return e.httpFetch(ctx, a.Args["url"])
+	case "update_document":
+		body, ok := a.Args["body"]
+		if !ok {
+			return Result{}, fmt.Errorf("agent: update_document requires a body")
+		}
+		return e.updateDocument(ctx, a.Args["id"], body)
+	case "delete_document":
+		return e.deleteDocument(ctx, a.Args["id"])
 	default:
 		return Result{}, fmt.Errorf("agent: unroutable tool %q", a.Tool)
 	}
@@ -136,6 +154,67 @@ func (e *NaiveExecutor) readDocument(ctx context.Context, id string) (Result, er
 		Summary: fmt.Sprintf("%s (%d bytes)", doc.Title, len(text)),
 		Route:   "unmediated",
 	}, nil
+}
+
+// updateDocument and deleteDocument are M3's planted bug (finding 05,
+// B3 1.1 / 1.2): the confused deputy.
+//
+// The agent acts with its own database credential -- ambient authority
+// -- and never asks whether the user it acts for may do this. A viewer
+// cannot delete through the direct API (M3 T3 enforces the role table in
+// both builds); a viewer's agent can, because nothing on this path ever
+// reads acting_for's role. The role is not cached, not stale, not
+// mis-read: it is never looked at.
+//
+// Nor is the session's scope. The row records the tools the session was
+// opened for (migration 003) and no field carries it here
+// (TestScopeNeverTravelsWithTheCall), so a session opened to summarise
+// can delete: B3 2.1, every grant in scope, as M2 D7 handed it over.
+//
+// What is NOT wrong, by the same argument as readDocument's: tenancy.
+// Both go through ForOrg(session org), so the confused deputy stays in
+// its own org. 05 is about whose authority, not which tenant.
+func (e *NaiveExecutor) updateDocument(ctx context.Context, id, body string) (Result, error) {
+	if id == "" {
+		return Result{}, fmt.Errorf("agent: update_document requires an id")
+	}
+	docs := store.ForOrg(e.cfg.Pool, e.cfg.OrgID)
+	// The tool replaces the body and keeps the title, so the title is
+	// read first. Two statements, not one: a concurrent title edit in
+	// between is lost. Accepted -- this is the vulnerable build, and the
+	// lost update is not the finding.
+	doc, found, err := docs.Get(ctx, id)
+	if err != nil {
+		return Result{}, fmt.Errorf("agent: update_document %s: %w", id, err)
+	}
+	if !found {
+		return Result{}, fmt.Errorf("agent: no document %s writable in org %s", id, e.cfg.OrgID)
+	}
+	doc.Body = body
+	_, stillThere, err := docs.Update(ctx, doc)
+	if err != nil {
+		return Result{}, fmt.Errorf("agent: update_document %s: %w", id, err)
+	}
+	if !stillThere {
+		return Result{}, fmt.Errorf("agent: document %s vanished during update in org %s", id, e.cfg.OrgID)
+	}
+	note := fmt.Sprintf("updated %s (%d bytes)", id, len(body))
+	return Result{Tool: "update_document", Text: note, Summary: note, Route: "unmediated"}, nil
+}
+
+func (e *NaiveExecutor) deleteDocument(ctx context.Context, id string) (Result, error) {
+	if id == "" {
+		return Result{}, fmt.Errorf("agent: delete_document requires an id")
+	}
+	deleted, err := store.ForOrg(e.cfg.Pool, e.cfg.OrgID).Delete(ctx, id)
+	if err != nil {
+		return Result{}, fmt.Errorf("agent: delete_document %s: %w", id, err)
+	}
+	if !deleted {
+		return Result{}, fmt.Errorf("agent: no document %s deletable in org %s", id, e.cfg.OrgID)
+	}
+	note := "deleted " + id
+	return Result{Tool: "delete_document", Text: note, Summary: note, Route: "unmediated"}, nil
 }
 
 // httpFetch is the mirror image of gateway/tools/fetch.py, and the
