@@ -20,7 +20,7 @@
 # binary that enforces it -- M1 T0's finding (a CI toolchain pin that
 # GOTOOLCHAIN silently overrode) applied one layer up.
 
-FROM openpolicyagent/opa@sha256:895872de1e8dc5b82e04f9410d2d1ada2f72d28fdcdba0e8789d91cfc27ec0d0 AS opa
+FROM openpolicyagent/opa@sha256:951ed07a3a41f5b02f68bf6f94ba1c952642daa597c89420986fd597eb09e661 AS opa
 
 FROM python:3.13-slim@sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045efa2ac1e9c5c3b2
 
