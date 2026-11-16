@@ -113,7 +113,7 @@ test-policy: ## Run `opa test` against the SAME digest the gateway ships  (M2, T
 	@test -d gateway/policy && test -f gateway/policy/policy.rego || { \
 		echo "gateway/policy/ is not applied yet -- see PROPOSED-POLICY.md"; exit 2; }
 	docker run --rm -v "$(CURDIR)/gateway/policy:/policy:ro" \
-		openpolicyagent/opa@sha256:895872de1e8dc5b82e04f9410d2d1ada2f72d28fdcdba0e8789d91cfc27ec0d0 \
+		openpolicyagent/opa@sha256:951ed07a3a41f5b02f68bf6f94ba1c952642daa597c89420986fd597eb09e661 \
 		test /policy
 
 verify-agent-builds: ## Assert the hardened agent binary contains no in-process tool code  (M2, D5)
