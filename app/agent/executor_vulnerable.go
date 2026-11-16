@@ -78,16 +78,19 @@ func NewAgentAudit() (*AgentAudit, error) {
 // is permitted. It passes code review ("we validate the tool name")
 // and constrains nothing an attacker cares about.
 //
-// M3 T4 adds the two write tools on the same terms. The check still
-// knows names only: not the requester's role, not the session's scope.
+// M3 T4 adds the two write tools on the same terms, and T5 the role
+// change. The check still knows names only: not the requester's role, not
+// the session's scope, and not that set_member_role is a control-plane
+// action no session should hold (SR-B3-7, SR-B8-2).
 var naiveAllowedTools = map[string]bool{
 	"read_document":   true,
 	"http_fetch":      true,
 	"update_document": true,
 	"delete_document": true,
+	"set_member_role": true,
 }
 
-func (e *NaiveExecutor) Execute(ctx context.Context, a Action, _ CallContext) (Result, error) {
+func (e *NaiveExecutor) Execute(ctx context.Context, a Action, call CallContext) (Result, error) {
 	// B5 2.1, the module's planted bug: the gateway is never consulted.
 	// Not asked and denied -- not asked at all. There is no POST to
 	// /gate anywhere in this file, because "it's internal, so it's
@@ -109,6 +112,8 @@ func (e *NaiveExecutor) Execute(ctx context.Context, a Action, _ CallContext) (R
 		return e.updateDocument(ctx, a.Args["id"], body)
 	case "delete_document":
 		return e.deleteDocument(ctx, a.Args["id"])
+	case "set_member_role":
+		return e.setMemberRole(ctx, a.Args["user"], store.Role(a.Args["role"]), call.Session)
 	default:
 		return Result{}, fmt.Errorf("agent: unroutable tool %q", a.Tool)
 	}
@@ -198,8 +203,7 @@ func (e *NaiveExecutor) updateDocument(ctx context.Context, id, body string) (Re
 	if !stillThere {
 		return Result{}, fmt.Errorf("agent: document %s vanished during update in org %s", id, e.cfg.OrgID)
 	}
-	note := fmt.Sprintf("updated %s (%d bytes)", id, len(body))
-	return Result{Tool: "update_document", Text: note, Summary: note, Route: "unmediated"}, nil
+	return unmediated("update_document", fmt.Sprintf("updated %s (%d bytes)", id, len(body))), nil
 }
 
 func (e *NaiveExecutor) deleteDocument(ctx context.Context, id string) (Result, error) {
@@ -213,8 +217,59 @@ func (e *NaiveExecutor) deleteDocument(ctx context.Context, id string) (Result, 
 	if !deleted {
 		return Result{}, fmt.Errorf("agent: no document %s deletable in org %s", id, e.cfg.OrgID)
 	}
-	note := "deleted " + id
-	return Result{Tool: "delete_document", Text: note, Summary: note, Route: "unmediated"}, nil
+	return unmediated("delete_document", "deleted "+id), nil
+}
+
+// unmediated is a write tool's result: one short note serves as both the
+// context text and the tool_calls summary, and the route is "unmediated" --
+// nothing decided this call, and recording "allow" would claim something
+// had (T5 of M2).
+func unmediated(tool, note string) Result {
+	return Result{Tool: tool, Text: note, Summary: note, Route: "unmediated"}
+}
+
+// setMemberRole is finding 06 (B3 4.2 / B8 1.2): a control-plane action
+// executed because content asked for it.
+//
+// The same ambient authority as the write tools above, and one thing more.
+// Even if this path checked the requester's role it would allow 06's call:
+// the requester is an admin. What is missing is not the ceiling (05) but
+// the rule above it -- authority is delegable, the authority to change the
+// delegation is not (SR-B3-7, SR-B8-2, D6). Hardened mode refuses it by
+// structure today -- no internal execution route for it exists, so even an
+// allow could not execute it, and the gateway's capability leg denies the
+// unlisted tool as unknown_tool. T7 adds the second, explicit refusal the
+// threat model requires: a denylist entry, control_plane_not_delegable.
+//
+// What this path does get right, deliberately, is the record. The change
+// goes through the same org-bound store method as the direct route, in one
+// transaction with its role_changes row, and the row names the acting user
+// AND the session (SR-B3-9: an agent-initiated change is distinguishable
+// from a human one). Both come from the CallContext the loop built from the
+// session row, never from the model. The vulnerable build must not be
+// silent, or T10 cannot measure a miss (M2 D4).
+func (e *NaiveExecutor) setMemberRole(ctx context.Context, user string, role store.Role, session SessionInfo) (Result, error) {
+	if user == "" {
+		return Result{}, fmt.Errorf("agent: set_member_role requires a user")
+	}
+	if !role.Valid() {
+		return Result{}, fmt.Errorf("agent: set_member_role: unknown role %q", role)
+	}
+	if session.ID == "" || session.ActingFor == "" {
+		return Result{}, fmt.Errorf("agent: set_member_role: no session to attribute the change to; refusing an unattributed role change")
+	}
+	change, found, err := store.ForOrg(e.cfg.Pool, e.cfg.OrgID).SetMemberRole(ctx, user, role,
+		store.RoleActor{User: session.ActingFor, Session: session.ID})
+	if err != nil {
+		return Result{}, fmt.Errorf("agent: set_member_role %s: %w", user, err)
+	}
+	if !found {
+		return Result{}, fmt.Errorf("agent: no member %s in org %s", user, e.cfg.OrgID)
+	}
+	if !change.Changed {
+		return unmediated("set_member_role", fmt.Sprintf("role of %s: already %s", user, change.After)), nil
+	}
+	return unmediated("set_member_role", fmt.Sprintf("role of %s: %s -> %s", user, change.Before, change.After)), nil
 }
 
 // httpFetch is the mirror image of gateway/tools/fetch.py, and the

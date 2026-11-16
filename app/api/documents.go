@@ -108,23 +108,38 @@ func (h *docHandlers) open(w http.ResponseWriter, r *http.Request, claims auth.C
 		notFound(w)
 		return nil, false
 	case accessForbidden:
-		// Logged where it is decided, like the not-a-member denial (SR-B2-8).
-		// A 403 reveals nothing a viewer cannot already see: every role reads
-		// every document in its org.
-		//
-		// The field is org=, NOT M1's target_org=, on purpose. M1's rule
-		// (detections/rule.py) reads target_org= as "an org this principal
-		// is probing from outside" and alerts on a sweep across orgs. A
-		// member refused inside their OWN org is a different signal --
-		// capability escalation, which T10 owns -- and matching M1's format
-		// would make that rule count it as a cross-tenant probe. The format
-		// is documented in detections/README.md.
-		log.Printf("authz: deny sub=%s org=%s decision=role-does-not-permit role=%q action=%s",
-			claims.Sub, pathOrgID, role, action)
-		writeJSONError(w, http.StatusForbidden, "your role in this org does not permit this action")
+		forbidden(w, claims.Sub, pathOrgID, role, action)
 		return nil, false
 	}
 	return ds, true
+}
+
+// logNotAMember records a caller refused because they hold no membership in
+// the org they addressed (SR-B2-8) -- M1's format, which M1's denial-burst
+// rule reads: target_org= is an org this principal is probing from outside.
+// One home for the line, so the document routes and the role route cannot
+// drift apart in what M1's detector sees.
+func logNotAMember(sub, orgID string) {
+	log.Printf("authz: deny sub=%s target_org=%s decision=not-a-member", sub, orgID)
+}
+
+// forbidden writes the 403 for a member whose role does not permit the
+// action, and logs it where it is decided, like the not-a-member denial
+// (SR-B2-8). Shared by the document routes and the role route (M3 T5), so
+// T10 reads one format for every in-org refusal. A 403 reveals nothing a
+// member cannot already see: every role reads every document in its org,
+// and knowing that roles exist is not a secret.
+//
+// The field is org=, NOT M1's target_org=, on purpose. M1's rule
+// (detections/rule.py) reads target_org= as "an org this principal is
+// probing from outside" and alerts on a sweep across orgs. A member refused
+// inside their OWN org is a different signal -- capability escalation,
+// which T10 owns -- and matching M1's format would make that rule count it
+// as a cross-tenant probe. The format is documented in detections/README.md.
+func forbidden(w http.ResponseWriter, sub, orgID string, role store.Role, action authz.Action) {
+	log.Printf("authz: deny sub=%s org=%s decision=role-does-not-permit role=%q action=%s",
+		sub, orgID, role, action)
+	writeJSONError(w, http.StatusForbidden, "your role in this org does not permit this action")
 }
 
 // resolveHardenedStore scopes to the PATH's org, but only after confirming the
@@ -150,7 +165,7 @@ func resolveHardenedStore(ctx context.Context, admin *store.AdminStore, pool *pg
 		// lookup is deliberately indistinguishable from not-found (OrgStore.Get's
 		// single WHERE id=$1 AND org_id=$2) and so cannot be logged without
 		// reintroducing the very distinction SR-M1-4 removes.
-		log.Printf("authz: deny sub=%s target_org=%s decision=not-a-member", claims.Sub, pathOrgID)
+		logNotAMember(claims.Sub, pathOrgID)
 		return nil, "", false, nil
 	}
 	return store.ForOrg(pool, pathOrgID), role, true, nil
