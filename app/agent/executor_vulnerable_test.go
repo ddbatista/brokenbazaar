@@ -8,16 +8,17 @@ import (
 	"testing"
 )
 
-// M3 T4 D1: the write tools pass the same name-only check as M2's two
-// tools (B5 3.2), and set_member_role is not among them yet (T5).
+// Plan M3 T4 D1 / T5 D4: the write tools pass the same name-only check as M2's
+// two tools (B5 3.2), and nothing else does.
 func TestNaiveAllowlistNamesTheWriteTools(t *testing.T) {
-	for _, tool := range []string{"read_document", "http_fetch", "update_document", "delete_document"} {
+	want := []string{"read_document", "http_fetch", "update_document", "delete_document", "set_member_role"}
+	for _, tool := range want {
 		if !naiveAllowedTools[tool] {
 			t.Errorf("naiveAllowedTools is missing %q", tool)
 		}
 	}
-	if naiveAllowedTools["set_member_role"] {
-		t.Error("set_member_role arrives in T5, not T4")
+	if len(naiveAllowedTools) != len(want) {
+		t.Errorf("naiveAllowedTools has %d tools, want exactly %v", len(naiveAllowedTools), want)
 	}
 }
 
@@ -36,11 +37,35 @@ func TestWriteToolsCheckArgumentsBeforeTheStore(t *testing.T) {
 		{"delete_document", map[string]string{}, "requires an id"},
 		{"update_document", map[string]string{"body": "x"}, "requires an id"},
 		{"update_document", map[string]string{"id": targetID}, "requires a body"},
+		{"set_member_role", map[string]string{"role": "admin"}, "requires a user"},
+		{"set_member_role", map[string]string{"user": targetID, "role": "owner"}, "unknown role"},
+		{"set_member_role", map[string]string{"user": targetID}, "unknown role"},
 	}
+	call := CallContext{Session: SessionInfo{ID: otherID, OrgID: e.cfg.OrgID, ActingFor: otherID}}
 	for _, c := range cases {
-		_, err := e.Execute(context.Background(), Action{Tool: c.tool, Args: c.args}, CallContext{})
+		_, err := e.Execute(context.Background(), Action{Tool: c.tool, Args: c.args}, call)
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s %v: want an error containing %q, got %v", c.tool, c.args, c.want, err)
+		}
+	}
+}
+
+// Plan M3 T5 D4: the role change is attributed to the session it came through --
+// the acting user and the session id, from the platform's CallContext,
+// never from the model. A call with no session to attribute it to is
+// refused before the store: an unattributed role change is exactly the
+// silent change SR-B8-7 forbids.
+func TestRoleChangeNeedsASessionToAttributeItTo(t *testing.T) {
+	e := &NaiveExecutor{cfg: ExecutorConfig{OrgID: "00000000-0000-0000-0000-000000000000"}}
+	args := map[string]string{"user": targetID, "role": "admin"}
+	for _, call := range []CallContext{
+		{},
+		{Session: SessionInfo{ID: otherID}},
+		{Session: SessionInfo{ActingFor: otherID}},
+	} {
+		_, err := e.Execute(context.Background(), Action{Tool: "set_member_role", Args: args}, call)
+		if err == nil || !strings.Contains(err.Error(), "attribute") {
+			t.Errorf("session %+v: want a refusal naming attribution, got %v", call.Session, err)
 		}
 	}
 }

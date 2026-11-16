@@ -173,7 +173,7 @@ func (s sealedMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // /healthz and /auth/token are listed here too, with their existing
 // auth: none, so this one path owns every route and no route can be
 // added without declaring how it is guarded.
-func registerHardened(h *docHandlers, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
+func registerHardened(h *docHandlers, m *memberHandlers, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
 	mux := http.NewServeMux()
 	routes := []route{
 		{http.MethodGet, "/healthz", authNone, noClaims(healthzHandler(true))},
@@ -184,6 +184,10 @@ func registerHardened(h *docHandlers, admin *store.AdminStore, secret, toolsSecr
 		{http.MethodGet, "/orgs/{org_id}/documents/{doc_id}", authToken, h.get},
 		{http.MethodPatch, "/orgs/{org_id}/documents/{doc_id}", authToken, h.update},
 		{http.MethodDelete, "/orgs/{org_id}/documents/{doc_id}", authToken, h.delete},
+
+		// M3 T5: the direct role route. The same handler and the same
+		// server-side decision in both modes (plan M3 T5 D1).
+		{http.MethodPatch, "/orgs/{org_id}/members/{user_id}", authToken, m.setRole},
 
 		// D5b. Declared in the table with an explicit authKind, which
 		// the committed threat model requires in as many words: "the
@@ -232,7 +236,7 @@ func registerHardened(h *docHandlers, admin *store.AdminStore, secret, toolsSecr
 // mechanism that makes a forgotten auth check loud (the hardened table above)
 // simply does not exist in this mode, which is the SR-B1-1 contrast the lab is
 // teaching.
-func registerVulnerable(mux *http.ServeMux, h *docHandlers, admin *store.AdminStore, secret []byte) {
+func registerVulnerable(mux *http.ServeMux, h *docHandlers, m *memberHandlers, admin *store.AdminStore, secret []byte) {
 	mux.HandleFunc("/healthz", healthzHandler(false))
 	mux.HandleFunc("/auth/token", authTokenHandler(admin, secret, false))
 
@@ -242,4 +246,10 @@ func registerVulnerable(mux *http.ServeMux, h *docHandlers, admin *store.AdminSt
 	mux.HandleFunc("GET /orgs/{org_id}/documents/{doc_id}", requireToken(secret, false, h.get))
 	mux.HandleFunc("PATCH /orgs/{org_id}/documents/{doc_id}", requireToken(secret, false, h.update))
 	mux.HandleFunc("DELETE /orgs/{org_id}/documents/{doc_id}", requireToken(secret, false, h.delete))
+
+	// M3 T5: the direct role route, identical to hardened mode's. Its caller
+	// is checked server-side here too: the token is trusted for identity
+	// (sub) only, never for org or role (plan M3 T5 D1). In this mode sub
+	// itself can be forged through finding 02 -- see members.go.
+	mux.HandleFunc("PATCH /orgs/{org_id}/members/{user_id}", requireToken(secret, false, m.setRole))
 }

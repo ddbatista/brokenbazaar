@@ -17,6 +17,18 @@ const (
 	RoleViewer Role = "viewer"
 )
 
+// Valid reports whether r is one of the three roles. The schema's
+// membership_role domain enforces the same list (migration 003); this is
+// the Go side of that language boundary, so an unknown role is refused
+// before a statement is sent rather than by a constraint error.
+func (r Role) Valid() bool {
+	switch r {
+	case RoleAdmin, RoleMember, RoleViewer:
+		return true
+	}
+	return false
+}
+
 type Org struct {
 	ID        string
 	Name      string
