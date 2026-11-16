@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -10,12 +12,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ddbatista/brokenbazaar/app/auth"
+	"github.com/ddbatista/brokenbazaar/app/authz"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
-// docHandlers serves the D4 document routes and GET /me. The one decision that
-// differs between modes -- which org's DocumentStore a request acts through,
-// and how that org is decided -- is isolated in resolveStore below; every
+// docHandlers serves the D4 document routes and GET /me. The decisions that
+// differ between modes for the document routes -- which org's DocumentStore a
+// request acts through, how that org is decided, and (since M3 T3) where the
+// caller's role comes from -- are isolated in resolveStore below. (GET /me
+// branches on the mode itself: see me.) Every
 // handler then calls through the store.DocumentStore interface and is otherwise
 // identical code. That is the whole reason D5 designed DocumentStore as a single
 // interface in T3: the vulnerability is not in the handlers, it is in the one
@@ -31,29 +36,110 @@ type docHandlers struct {
 // a reader can see the entire difference between the hardened and vulnerable
 // products in one function pair rather than scattered across six handlers.
 //
-// The bool is "proceed": false means the caller must return the uniform 404
-// (hardened mode, no membership). Vulnerable mode always proceeds -- it never
-// denies, which is exactly the point.
-func (h *docHandlers) resolveStore(ctx context.Context, pathOrgID string, claims auth.Claims) (store.DocumentStore, bool, error) {
+// It returns the store, the caller's role, and whether the caller is a
+// member of the acting org. member=false means the caller must return the
+// uniform 404 (hardened mode, no membership). Vulnerable mode always reports
+// a member -- it never checks, which is exactly the point.
+//
+// The role's source differs by mode, and that is the second decision the
+// modes make here (plan M3 T3 D2). Hardened: the membership lookup it already
+// makes. Vulnerable: claims.Role -- the same "I already verified the JWT, why
+// hit the DB again" reasoning that takes the org from claims.OrgID. An honest
+// token carries the user's real role, so the role check below holds against
+// it in both modes, which m3-delegation.md D1 needs: a viewer who could
+// simply delete directly would make finding 05 show nothing. Forging the
+// role needs finding 02's alg:none bug; no new weakness is planted here.
+func (h *docHandlers) resolveStore(ctx context.Context, pathOrgID string, claims auth.Claims) (store.DocumentStore, store.Role, bool, error) {
 	if h.hardened {
 		return resolveHardenedStore(ctx, h.admin, h.pool, pathOrgID, claims)
 	}
-	return resolveVulnerableStore(h.pool, claims), true, nil
+	return resolveVulnerableStore(h.pool, claims), store.Role(claims.Role), true, nil
+}
+
+// access is the outcome of the one per-request authorization decision.
+type access int
+
+const (
+	accessGranted   access = iota
+	accessNotFound         // not a member: M1's uniform 404 (SR-B2-5)
+	accessForbidden        // a member whose role does not permit the action: 403 (plan M3 T3 D3)
+)
+
+func (a access) String() string {
+	switch a {
+	case accessGranted:
+		return "granted"
+	case accessNotFound:
+		return "not-found"
+	case accessForbidden:
+		return "forbidden"
+	}
+	return fmt.Sprintf("access(%d)", int(a))
+}
+
+// accessFor is that decision. Membership first: a non-member gets the 404
+// whatever the action, and the role is never consulted -- a 403 would
+// confirm the org exists and the caller is merely under-privileged. Then the
+// role, against the one permission table (authz, m3-delegation.md D1/D4).
+func accessFor(member bool, role store.Role, action authz.Action) access {
+	if !member {
+		return accessNotFound
+	}
+	if !authz.Permits(role, action) {
+		return accessForbidden
+	}
+	return accessGranted
+}
+
+// open resolves the store for this request and applies accessFor. It writes
+// the 500, 404 or 403 itself, so a handler reads: open, and return unless
+// ok. Every document route goes through it, in both modes -- roles have teeth
+// on the direct API whatever HARDENED says (m3-delegation.md D1); the planted
+// confused deputy lives in the delegation path only.
+func (h *docHandlers) open(w http.ResponseWriter, r *http.Request, claims auth.Claims, action authz.Action) (store.DocumentStore, bool) {
+	pathOrgID := r.PathValue("org_id")
+	ds, role, member, err := h.resolveStore(r.Context(), pathOrgID, claims)
+	if err != nil {
+		internalError(w, err)
+		return nil, false
+	}
+	switch accessFor(member, role, action) {
+	case accessNotFound:
+		notFound(w)
+		return nil, false
+	case accessForbidden:
+		// Logged where it is decided, like the not-a-member denial (SR-B2-8).
+		// A 403 reveals nothing a viewer cannot already see: every role reads
+		// every document in its org.
+		//
+		// The field is org=, NOT M1's target_org=, on purpose. M1's rule
+		// (detections/rule.py) reads target_org= as "an org this principal
+		// is probing from outside" and alerts on a sweep across orgs. A
+		// member refused inside their OWN org is a different signal --
+		// capability escalation, which T10 owns -- and matching M1's format
+		// would make that rule count it as a cross-tenant probe. The format
+		// is documented in detections/README.md.
+		log.Printf("authz: deny sub=%s org=%s decision=role-does-not-permit role=%q action=%s",
+			claims.Sub, pathOrgID, role, action)
+		writeJSONError(w, http.StatusForbidden, "your role in this org does not permit this action")
+		return nil, false
+	}
+	return ds, true
 }
 
 // resolveHardenedStore scopes to the PATH's org, but only after confirming the
 // user's real, current membership in it server-side (SR-B2-2). It never trusts
 // claims.OrgID.
-func resolveHardenedStore(ctx context.Context, admin *store.AdminStore, pool *pgxpool.Pool, pathOrgID string, claims auth.Claims) (store.DocumentStore, bool, error) {
+func resolveHardenedStore(ctx context.Context, admin *store.AdminStore, pool *pgxpool.Pool, pathOrgID string, claims auth.Claims) (store.DocumentStore, store.Role, bool, error) {
 	// SR-B2-2: the acting org is decided by the user's membership in the PATH's
 	// {org_id}, looked up against records the API owns -- never from
-	// claims.OrgID. That claim is present and signed (M1-N5) but is exactly the
-	// field finding 02 forges, so it is not consulted here. The role is read
-	// but intentionally discarded: M1 authorises on membership alone -- any
-	// member does all CRUD -- because roles "with real teeth" are M3 scope.
-	_, ok, err := admin.MembershipRole(ctx, pathOrgID, claims.Sub)
+	// claims.OrgID, which since M3 T3 the hardened issuer does not even mint
+	// (SR-M1-5). The role comes from the same lookup and is returned for the
+	// caller's check (M3 T3): M1 read it and discarded it, because roles "with
+	// real teeth" were M3 scope.
+	role, ok, err := admin.MembershipRole(ctx, pathOrgID, claims.Sub)
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	if !ok {
 		// SR-B2-5 / SR-M1-4: "not a member of this org" is turned by the caller
@@ -65,9 +151,9 @@ func resolveHardenedStore(ctx context.Context, admin *store.AdminStore, pool *pg
 		// single WHERE id=$1 AND org_id=$2) and so cannot be logged without
 		// reintroducing the very distinction SR-M1-4 removes.
 		log.Printf("authz: deny sub=%s target_org=%s decision=not-a-member", claims.Sub, pathOrgID)
-		return nil, false, nil
+		return nil, "", false, nil
 	}
-	return store.ForOrg(pool, pathOrgID), true, nil
+	return store.ForOrg(pool, pathOrgID), role, true, nil
 }
 
 // resolveVulnerableStore is the planted decision every vulnerable document
@@ -149,16 +235,41 @@ type updateDocumentRequest struct {
 	Body  string `json:"body"`
 }
 
-// meResponse echoes the verified claims (D4 GET /me). No store access and no
-// planted bug -- it is the claims-echo the route table names.
+// meResponse is GET /me (D4): who the caller is, their org and their role.
+// Same shape in both modes, because every PoC learns its org from it.
 type meResponse struct {
 	Sub   string `json:"sub"`
 	OrgID string `json:"org_id"`
 	Role  string `json:"role"`
 }
 
+// me answers differently by mode (plan M3 T3 D4). Vulnerable: it echoes the
+// verified claims, as in M1. Hardened: the token no longer carries org_id or
+// role (SR-M1-5), so /me answers from the membership lookup the issuer makes
+// -- reporting facts the server holds rather than echoing claims, which is
+// the hardened path's stance everywhere else (SR-B2-2).
 func (h *docHandlers) me(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	writeJSON(w, http.StatusOK, meResponse{Sub: claims.Sub, OrgID: claims.OrgID, Role: claims.Role})
+	if !h.hardened {
+		writeJSON(w, http.StatusOK, meResponse{Sub: claims.Sub, OrgID: claims.OrgID, Role: claims.Role})
+		return
+	}
+	orgID, role, err := h.admin.SoleMembership(r.Context(), claims.Sub)
+	switch {
+	case errors.Is(err, store.ErrNoMembership):
+		// A token is issued only after this same lookup succeeds, so the
+		// membership was removed since issue. The caller is no longer
+		// anyone in any org: the issuer's uniform 401, not a server fault.
+		unauthorized(w)
+		return
+	case errors.Is(err, store.ErrAmbiguousMembership):
+		// Same answer the issuer gives (multi-org login is not built).
+		writeJSONError(w, http.StatusNotImplemented, "multi-org login is not supported")
+		return
+	case err != nil:
+		internalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, meResponse{Sub: claims.Sub, OrgID: orgID, Role: string(role)})
 }
 
 // listOrSearch serves GET /orgs/{org_id}/documents, branching on the q param:
@@ -166,13 +277,8 @@ func (h *docHandlers) me(w http.ResponseWriter, r *http.Request, claims auth.Cla
 // here in vulnerable mode -- List filters, Search does not.
 func (h *docHandlers) listOrSearch(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
-	ds, ok, err := h.resolveStore(ctx, r.PathValue("org_id"), claims)
-	if err != nil {
-		internalError(w, err)
-		return
-	}
+	ds, ok := h.open(w, r, claims, authz.Read)
 	if !ok {
-		notFound(w)
 		return
 	}
 
@@ -211,14 +317,8 @@ func (h *docHandlers) listOrSearch(w http.ResponseWriter, r *http.Request, claim
 
 func (h *docHandlers) create(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
-	pathOrgID := r.PathValue("org_id")
-	ds, ok, err := h.resolveStore(ctx, pathOrgID, claims)
-	if err != nil {
-		internalError(w, err)
-		return
-	}
+	ds, ok := h.open(w, r, claims, authz.Create)
 	if !ok {
-		notFound(w)
 		return
 	}
 
@@ -260,13 +360,8 @@ func (h *docHandlers) create(w http.ResponseWriter, r *http.Request, claims auth
 
 func (h *docHandlers) get(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
-	ds, ok, err := h.resolveStore(ctx, r.PathValue("org_id"), claims)
-	if err != nil {
-		internalError(w, err)
-		return
-	}
+	ds, ok := h.open(w, r, claims, authz.Read)
 	if !ok {
-		notFound(w)
 		return
 	}
 	// Hardened: OrgStore.Get's single WHERE id=$1 AND org_id=$2 makes wrong-org
@@ -287,13 +382,8 @@ func (h *docHandlers) get(w http.ResponseWriter, r *http.Request, claims auth.Cl
 
 func (h *docHandlers) update(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
-	ds, ok, err := h.resolveStore(ctx, r.PathValue("org_id"), claims)
-	if err != nil {
-		internalError(w, err)
-		return
-	}
+	ds, ok := h.open(w, r, claims, authz.Update)
 	if !ok {
-		notFound(w)
 		return
 	}
 	var req updateDocumentRequest
@@ -320,13 +410,8 @@ func (h *docHandlers) update(w http.ResponseWriter, r *http.Request, claims auth
 
 func (h *docHandlers) delete(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
-	ds, ok, err := h.resolveStore(ctx, r.PathValue("org_id"), claims)
-	if err != nil {
-		internalError(w, err)
-		return
-	}
+	ds, ok := h.open(w, r, claims, authz.Delete)
 	if !ok {
-		notFound(w)
 		return
 	}
 	deleted, err := ds.Delete(ctx, r.PathValue("doc_id"))

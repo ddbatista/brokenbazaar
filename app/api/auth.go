@@ -24,13 +24,14 @@ type tokenResponse struct {
 	ExpiresAt int64  `json:"expires_at"`
 }
 
-// authTokenHandler serves POST /auth/token. The `hardened` flag selects the
-// one behaviour that differs between modes: whether a password is a required
-// proof (SR-B1-2) or whether an email alone is accepted as sufficient
-// (B1 1.1). Everything else -- the lookup, the membership resolution, the
-// minting -- is identical, because the honest issuer is honest in both modes
-// (SR-B1-4); M1's token weakness is at verification time (finding 02), not at
-// issue time.
+// authTokenHandler serves POST /auth/token. The `hardened` flag selects two
+// behaviours. Whether a password is a required proof (SR-B1-2) or an email
+// alone is accepted as sufficient (B1 1.1). And, since M3 T3, which claims are
+// minted: the hardened token carries no org_id and no role (SR-M1-5, see
+// mintClaims). The lookup and the membership resolution are identical, and
+// the issuer is honest in both modes (SR-B1-4): it never mints a claim that
+// is untrue. M1's token weakness is at verification time (finding 02), not
+// at issue time.
 func authTokenHandler(admin *store.AdminStore, secret []byte, hardened bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -108,15 +109,7 @@ func authTokenHandler(admin *store.AdminStore, secret []byte, hardened bool) htt
 			return
 		}
 
-		now := time.Now()
-		claims := auth.Claims{
-			Sub:   user.ID,
-			OrgID: orgID,
-			Role:  string(role),
-			Iss:   auth.Issuer,
-			Iat:   now.Unix(),
-			Exp:   now.Add(auth.TokenTTL).Unix(),
-		}
+		claims := mintClaims(user.ID, orgID, role, hardened, time.Now())
 		token, err := auth.Encode(claims, secret)
 		if err != nil {
 			log.Printf("auth: encoding token for %q: %v", req.Email, err)
@@ -126,6 +119,30 @@ func authTokenHandler(admin *store.AdminStore, secret []byte, hardened bool) htt
 
 		writeJSON(w, http.StatusOK, tokenResponse{Token: token, ExpiresAt: claims.Exp})
 	}
+}
+
+// mintClaims builds the claims the issuer signs. The modes differ in one
+// thing (plan M3 T3 D4, SR-M1-5): the hardened token carries identity and
+// validity only. Its org and role are resolved server-side on every request
+// (SR-B2-2, m3-delegation.md D1), so a copy in the token would be a claim the
+// hardened path never believes -- and a future handler could believe by
+// mistake. The vulnerable token keeps both: org_id is finding 02's
+// substrate, and the vulnerable path reads role from the token (plan M3 T3
+// D2).
+//
+// The membership lookup runs in both modes regardless, so a user with no
+// membership still cannot be issued a token in either.
+func mintClaims(userID, orgID string, role store.Role, hardened bool, now time.Time) auth.Claims {
+	claims := auth.Claims{
+		Sub: userID,
+		Iss: auth.Issuer,
+		Iat: now.Unix(),
+		Exp: now.Add(auth.TokenTTL).Unix(),
+	}
+	if !hardened {
+		claims.OrgID, claims.Role = orgID, string(role)
+	}
+	return claims
 }
 
 // unauthorized writes the single, uniform 401 used for every credential
