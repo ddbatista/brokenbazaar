@@ -126,16 +126,17 @@ func logNotAMember(sub, orgID string) {
 // forbidden writes the 403 for a member whose role does not permit the
 // action, and logs it where it is decided, like the not-a-member denial
 // (SR-B2-8). Shared by the document routes and the role route (M3 T5), so
-// T10 reads one format for every in-org refusal. A 403 reveals nothing a
-// member cannot already see: every role reads every document in its org,
-// and knowing that roles exist is not a secret.
+// R6 (detections/delegation_rules.py) reads one format for every in-org
+// refusal. A 403 reveals nothing a member cannot already see: every role
+// reads every document in its org, and knowing that roles exist is not a
+// secret.
 //
 // The field is org=, NOT M1's target_org=, on purpose. M1's rule
 // (detections/rule.py) reads target_org= as "an org this principal is
 // probing from outside" and alerts on a sweep across orgs. A member refused
 // inside their OWN org is a different signal -- capability escalation,
-// which T10 owns -- and matching M1's format would make that rule count it
-// as a cross-tenant probe. The format is documented in detections/README.md.
+// which M3's R6 reads -- and matching M1's format would make that rule
+// count it as a cross-tenant probe. The format is documented in detections/README.md.
 func forbidden(w http.ResponseWriter, sub, orgID string, role store.Role, action authz.Action) {
 	log.Printf("authz: deny sub=%s org=%s decision=role-does-not-permit role=%q action=%s",
 		sub, orgID, role, action)

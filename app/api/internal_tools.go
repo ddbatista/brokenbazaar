@@ -104,7 +104,8 @@ func (it *internalTools) load(w http.ResponseWriter, ctx context.Context, sessio
 // authorize is the execution routes' re-check: the legs NOW, or a 403 that
 // names the first failing leg. Logged where it is decided, in a format of
 // its own (session=, not M1's target_org=): this is a refusal at execution
-// of a call the gateway had allowed, which T10 reads as its own signal.
+// of a call the gateway had allowed, which R6 (detections/delegation_rules.py)
+// reads as its own signal.
 func (it *internalTools) authorize(w http.ResponseWriter, ctx context.Context, sessionID, tool string) (store.SessionAuthority, bool) {
 	s, legs, ok := it.load(w, ctx, sessionID, tool)
 	if !ok {
