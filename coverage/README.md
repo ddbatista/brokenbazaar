@@ -14,8 +14,10 @@ Tags are pinned to a framework version, because the young projects (MCP, AST) ar
 | 02 | jwt org claim | B1, B2 | M1 | **A01:2021**, **A07:2021** — Broken Access Control + Identification/Authentication Failures. No AI-standard home. |
 | 03 | indirect injection | B4, B5 (+ B3, the least-privilege variant) | M2, M3 | **LLM01:2025** Prompt Injection · **ASI01 2026** Agent Goal Hijack · **MCP06:2025** · **MCP10:2025** |
 | 04 | ssrf metadata | B5, B7 | M2 | **LLM06:2025** Excessive Agency · **ASI02 2026** Tool Misuse and Exploitation · **MCP05:2025** · **A10:2021** Server-Side Request Forgery |
+| 05 | confused deputy | B3, B5 | M3 | **LLM06:2025** Excessive Agency · **ASI03 2026** Identity and Privilege Abuse · **A01:2021** Broken Access Control. No LLM01: nothing is injected; the user asks in their own words. |
+| 06 | policy plane | B3, B8 | M3 | **LLM01:2025** Prompt Injection (the vector) · **LLM06:2025** Excessive Agency · **ASI01 2026** Agent Goal Hijack · **ASI03 2026** Identity and Privilege Abuse · **A01:2021** Broken Access Control |
 
-03 and 04 carry agent-era tags because the agent is the mechanism: the planted bug is the agent executing its tools with no gate.
+03 and 04 carry agent-era tags because the agent is the mechanism: the planted bug is the agent executing its tools with no gate. 05 and 06 carry an agent-era tag for the same reason: the same request through the direct API is refused in both builds. They also carry A01, because what fails is authorization.
 
 **The honest-mapping rule.** Findings 01 and 02 are Broken Access Control, full stop. Forcing an LLM-framework ID onto an authz bug is the tell of a portfolio repo written for keywords, not for findings. Where a later finding genuinely answers an agent-era framework, it is tagged there — pinned, and in this order: OWASP LLM Top 10 → OWASP Agentic (ASI) → MCP Top 10 (e.g. `MCP03:2025`) → Agentic Skills Top 10 (e.g. `AST01 v0.5 2026-06`) → classic OWASP Top 10.
 
@@ -40,6 +42,19 @@ Silent gaps read as ignorance; declared gaps read as judgment. Nothing below is 
 | **An LLM judge in the gate** | M2's gate decides deterministically; no ambiguous call exists to adjudicate. The judge, and its subject-vs-testimony audit, are M4a's. | M2 D2, M2-N3 / M2-N5 |
 | **A hostname that resolves to a metadata address, seen by detection in vulnerable mode** | The vulnerable agent records no resolved address, so R3 sees names and redirect targets only there. The control is unaffected; this is detection's limit. | `detections/README.md` (M2) |
 
+**M3 — delegation (findings 05, 06):**
+
+| Not covered | Why | Carried by |
+|---|---|---|
+| **A role changed by direct SQL** | The agent's database credential can write `memberships` and the role-change audit. No gateway rule sees SQL, and detection (R5) sees changes made through the product only. Compromise-level; the fix is a database-role split, recorded as a follow-up. | R-M3-2 (m3-delegation.md §6) |
+| **An in-role, in-scope write steered by a document** | A member plants *"delete document X"*; an admin's session with `delete_document` in scope obeys. Neither M3 control refuses it. Per-context provenance cannot gate writes without denying all of them; argument-level provenance is M4b's. | R-M3-3, M3-N4 |
+| **Untrusted text replicated through `update_document`** | No authority persists (every read is untrusted), but the text does. The detection shape is recorded, not built. | R-M3-4, M3-N6 |
+| **Finding 05 detected in vulnerable mode** | Seeing it needs the user's role at the call's time **and** the permission table. A second copy of the table is what M3 D4 forbids. Measured as a miss in `make detect`. | `detections/README.md` (M3) |
+| **Session-ID forgery by a compromised agent process** | Defending it means defending against an attacker who already holds the process. | R-M3-1 |
+| **Rate and volume limits on agent actions** | Deferred to M4a, where installed tools make volume a real axis. | SR-B5-7, plan M3 D8 |
+| **A session widening its own scope** | Unreachable: no scope-change tool or route exists, and `sessions.scope` has no update path. | SR-B3-6, plan M3 D8 |
+| **Membership removal** | No removal path exists, and the obvious one (`ON DELETE CASCADE`) would erase the agent's transcript. Declared so the first module that builds it starts from the trap. | R-M3-5, M3-N3 |
+
 The M4-era entries — MCP09 Shadow MCP Servers, AST06 Weak Isolation, AST10 Cross-Platform Reuse, AST02 registry-level compromise — land with M4, where the marketplace exists to make them meaningful or explicitly declined.
 
 ## Corrections log — when a diff corrected the baseline
@@ -48,3 +63,5 @@ The baseline (`threat-models/v0-baseline.md`) is an artifact with a date on it; 
 
 - **M1-N2 (m1-tenancy.md §4):** SR-B2-1 — *"no code path can obtain a database handle without an org context"* — was **false as written the moment a seed existed**: bootstrap wrote to all three tenants before any token existed, outside both stores. The pattern: an invariant asserted over "all code paths" is routinely false for the paths that run before the system is up. Corrected by SR-M1-2 (seed goes through `OrgStore`, one `ForOrg` handle per org); the baseline's wording fix lands in `v1`, not by editing `v0`.
 - **M2-N3 (m2-agent-gateway.md §4):** SR-B5-1 says no attacker-influenceable value is an input to a decision. But a decision's **subject**, the fully-resolved arguments, is attacker-influenced and *must* be inspected (SR-B5-3). The line SR-B5-1 needs is between that subject and **testimony** about it: the tool's self-description, the model's stated justification, a prior result. Testimony must never be consulted, because each is an assertion by the party being judged. Queued for `v1`, with A8.2's scope note and A8.10's split between the application layer and the network layer.
+- **M3 planning, D3, the reverse direction: the baseline corrected the plan.** Recorded here because it is the same instrument working the other way. The plan's Defend line, *"per-session capability token = intersection(…)"*, contradicted SR-B3-3 (*authority re-derived at action time, never cached at session creation*). A token that carries the capability set caches authority, and finding 05's demotion variant walks through it. The requirement stood; the plan changed. The session ID names the session and grants nothing, and authority is re-derived on every action ([`defenses/the-session-names-it-never-grants.md`](../defenses/the-session-names-it-never-grants.md)).
+- **M3 D6 (m3-delegation.md §8):** the baseline maps finding 06 to B8 leaf 1.1 (`v0-baseline.md`, B8's *Exploit* line). M3's diff re-maps it to **1.2**, because the tenant-setting version of 06 could not show causation in a build with no gateway. The finding became an admin's agent steered into a control-plane action.
