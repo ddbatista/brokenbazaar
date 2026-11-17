@@ -22,7 +22,7 @@ type target struct {
 	orgID     string
 	sessionID string   // existing-session shape
 	actingFor string   // fresh-session shape
-	message   string   // fresh-session shape
+	message   string   // fresh-session shape; optional next turn of an existing one (plan M3 T8 D2)
 	scope     []string // fresh-session shape: the tools the session may request (plan M3 T2 D4)
 }
 
@@ -31,6 +31,8 @@ func (t target) fresh() bool { return t.sessionID == "" }
 // parseTarget validates the flag combination. Exactly one shape:
 //
 //	-org O -session S                    run an existing session
+//	-org O -session S -message "..."     continue it with the user's next
+//	                                     request, then run it (plan M3 T8 D2)
 //	-org O -acting-for U -message "..." -scope T1,T2
 //	                                     open a fresh session, then run it
 //
@@ -55,14 +57,18 @@ func parseTarget(orgID, sessionID, actingFor, message, scope string) (target, er
 	if orgID == "" {
 		return target{}, errors.New("-org is required")
 	}
-	if sessionID != "" && (actingFor != "" || message != "") {
-		return target{}, errors.New("give -session OR -acting-for/-message, not both")
+	if sessionID != "" && actingFor != "" {
+		return target{}, errors.New("give -session OR -acting-for, not both: an existing session's row already says who it acts for")
 	}
 	if sessionID != "" {
 		if strings.TrimSpace(scope) != "" {
 			return target{}, errors.New("-scope applies to a fresh session only: an existing session's scope is fixed on its row")
 		}
-		return target{orgID: orgID, sessionID: sessionID}, nil
+		// A -message here is the user's NEXT request in the same session
+		// (plan M3 T8 D2): the user, the org and the scope all stay the
+		// row's. Nothing about the session's authority changes -- the
+		// gateway re-derives it on every action anyway (D3).
+		return target{orgID: orgID, sessionID: sessionID, message: message}, nil
 	}
 	switch {
 	case actingFor == "" && message == "":
@@ -101,6 +107,22 @@ func parseScope(scope string) ([]string, error) {
 		tools = append(tools, tool)
 	}
 	return tools, nil
+}
+
+// continueWith stores the user's next request in an existing session, origin
+// user, through the same ForSession road openFresh uses (plan M3 T8 D2). The
+// row's acting user is the author: a continued session never changes who it
+// acts for.
+func continueWith(ctx context.Context, pool *pgxpool.Pool, t target, sess store.Session) error {
+	_, err := store.ForSession(pool, t.orgID, sess.ID).AppendMessage(ctx, store.Message{
+		Role:   store.MessageRoleUser,
+		Origin: store.MessageOriginUser,
+		Body:   t.message,
+	})
+	if err != nil {
+		return fmt.Errorf("storing the next request in session %s: %w", sess.ID, err)
+	}
+	return nil
 }
 
 // openFresh creates the session and stores the user's request as its

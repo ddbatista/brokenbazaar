@@ -213,13 +213,8 @@ class RunMain(unittest.TestCase):
         self.assertEqual(ctx.exception.code, agentlab.EXIT_OPERATIONAL)
 
 
-class RunAgentScope(unittest.TestCase):
-    """Plan M3 T2 D4: every fresh session states the tools it may request.
-
-    The scope is passed to the agent as -scope, in the order given, and a
-    run with no scope is refused before docker is touched -- there is no
-    default, because SR-B3-5 says the scope is explicitly requested.
-    """
+class ComposeFake:
+    """Stands in for docker: records each `docker compose` call, answers VULN_STDOUT."""
 
     def setUp(self):
         self.calls = []
@@ -240,6 +235,15 @@ class RunAgentScope(unittest.TestCase):
         agentlab._compose = self._saved[0]
         agentlab._built_for.clear()
         agentlab._built_for.update(self._saved[1])
+
+
+class RunAgentScope(ComposeFake, unittest.TestCase):
+    """Plan M3 T2 D4: every fresh session states the tools it may request.
+
+    The scope is passed to the agent as -scope, in the order given, and a
+    run with no scope is refused before docker is touched -- there is no
+    default, because SR-B3-5 says the scope is explicitly requested.
+    """
 
     def test_the_scope_reaches_the_agent_as_a_flag(self):
         agentlab.run_agent(False, "o-1", "u-1", "hi", ("read_document", "http_fetch"))
@@ -283,3 +287,192 @@ class RunAgentScope(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --- plan M3 T8 -----------------------------------------------------------------
+
+def pre(tool, route, reason="", decision="d1", session="s-1"):
+    return {"phase": "pre", "decision_id": decision, "session": session, "tool": tool,
+            "route": route, "reasons": [reason] if reason else []}
+
+
+class DenialAndAllowed(unittest.TestCase):
+    """Plan M3 T8: the per-tool readings 05 and 06 judge on."""
+
+    def test_the_policy_reason_for_one_tool(self):
+        recs = [pre("read_document", "allow", "policy_satisfied", "d1"),
+                pre("delete_document", "deny", "role_does_not_permit", "d2")]
+        self.assertEqual(agentlab.denial(recs, "delete_document"), "role_does_not_permit")
+        self.assertIsNone(agentlab.denial(recs, "read_document"))
+        self.assertIsNone(agentlab.denial(recs, "set_member_role"))
+
+    def test_a_refusal_at_execution_is_not_a_gateway_denial(self):
+        # M3 T6: the GATE allowed it and only the API's re-check refused it.
+        # The tenant is safe, but the gate's leg did NOT hold -- reporting
+        # "gateway denied: role_does_not_permit" here would hide a broken
+        # gate behind the API's backstop (T8 spec review). Operational.
+        rec = dict(pre("delete_document", "allow", "policy_satisfied"),
+                   outcome="refused_at_execution", summary="role_does_not_permit")
+        with self.assertRaises(agentlab.Operational) as ctx:
+            agentlab.denial([rec], "delete_document")
+        self.assertIn("ALLOWED", str(ctx.exception))
+
+    def test_a_fail_closed_deny_is_operational(self):
+        for reason in ("opa_unavailable", "enrichment_failed"):
+            with self.subTest(reason), self.assertRaises(agentlab.Operational):
+                agentlab.denial([pre("delete_document", "deny", reason)], "delete_document")
+
+    def test_fetch_denial_is_denial_for_http_fetch(self):
+        recs = [pre("http_fetch", "deny", "not_in_session_scope")]
+        self.assertEqual(agentlab.fetch_denial(recs), "not_in_session_scope")
+
+    def test_allowed_means_allowed_AND_executed(self):
+        ok = dict(pre("delete_document", "allow", "policy_satisfied"), outcome="ok")
+        self.assertTrue(agentlab.allowed([ok], "delete_document"))
+        # Allowed by the gate but never completed is not a positive control.
+        self.assertFalse(agentlab.allowed([pre("delete_document", "allow", "policy_satisfied")], "delete_document"))
+        refused = dict(ok, outcome="refused_at_execution")
+        self.assertFalse(agentlab.allowed([refused], "delete_document"))
+        self.assertFalse(agentlab.allowed([dict(ok, tool="read_document")], "delete_document"))
+
+
+class Resume(ComposeFake, unittest.TestCase):
+    """Plan M3 T8 D2: the same session, run again, optionally with a new turn."""
+
+    def test_resume_runs_the_named_session(self):
+        sid = "11111111-1111-1111-1111-111111111111"   # VULN_STDOUT's session
+        agentlab.resume(False, "o-1", sid)
+        (args,) = self.calls
+        self.assertEqual(args[args.index("-session") + 1], sid)
+        self.assertNotIn("-message", args)
+        self.assertNotIn("-scope", args)
+        self.assertNotIn("-acting-for", args)
+
+    def test_resume_with_the_users_next_request(self):
+        sid = "11111111-1111-1111-1111-111111111111"
+        agentlab.resume(False, "o-1", sid, "delete document d1")
+        (args,) = self.calls
+        self.assertEqual(args[args.index("-message") + 1], "delete document d1")
+
+    def test_a_run_that_reports_another_session_is_operational(self):
+        with self.assertRaises(agentlab.Operational):
+            agentlab.resume(False, "o-1", "99999999-9999-9999-9999-999999999999")
+
+
+class SetRole(unittest.TestCase):
+    """The idempotent role precondition (rule 5), through the direct admin route."""
+
+    def setUp(self):
+        self.saved = agentlab.http
+        self.addCleanup(setattr, agentlab, "http", self.saved)
+
+    def answer(self, status, body):
+        seen = []
+
+        def fake(method, url, body_=None, token=None, timeout=10):
+            seen.append((method, url, body_, token))
+            return status, json.dumps(body) if not isinstance(body, str) else body
+        agentlab.http = fake
+        return seen
+
+    def test_patches_the_member_and_returns_the_change(self):
+        seen = self.answer(200, {"role": "viewer", "previous_role": "admin", "changed": True})
+        got = agentlab.set_role("http://x", "tok", "o-1", "u-2", "viewer")
+        self.assertEqual(seen, [("PATCH", "http://x/orgs/o-1/members/u-2", {"role": "viewer"}, "tok")])
+        self.assertEqual((got["previous_role"], got["role"]), ("admin", "viewer"))
+
+    def test_anything_but_the_role_asked_for_is_operational(self):
+        for status, body in ((403, {"error": "forbidden"}), (200, {"role": "member"}), (200, "nope")):
+            with self.subTest(status=status, body=body):
+                self.answer(status, body)
+                with self.assertRaises(agentlab.Operational):
+                    agentlab.set_role("http://x", "tok", "o-1", "u-2", "viewer")
+
+
+class Documents(SetRole):
+    """The per-run document helpers: anything unexpected is Operational."""
+
+    def test_create_returns_the_id_and_refuses_anything_but_201(self):
+        self.answer(201, {"id": "d-1"})
+        self.assertEqual(agentlab.create_document("http://x", "tok", "o-1", "t", "b"), "d-1")
+        self.answer(403, {"error": "forbidden"})
+        with self.assertRaises(agentlab.Operational):
+            agentlab.create_document("http://x", "tok", "o-1", "t", "b")
+
+    def test_get_reads_the_document_or_none(self):
+        self.answer(200, {"id": "d-1", "body": "b"})
+        self.assertEqual(agentlab.get_document("http://x", "tok", "o-1", "d-1"), (200, {"id": "d-1", "body": "b"}))
+        self.answer(404, {"error": "not found"})
+        self.assertEqual(agentlab.get_document("http://x", "tok", "o-1", "d-1"), (404, None))
+
+    def test_delete_reports_the_status(self):
+        seen = self.answer(204, "")
+        self.assertEqual(agentlab.delete_document("http://x", "tok", "o-1", "d-1"), 204)
+        self.assertEqual(seen[0][:2], ("DELETE", "http://x/orgs/o-1/documents/d-1"))
+
+
+class Cleanup(SetRole):
+    def test_a_failing_step_never_raises_and_the_rest_still_runs(self):
+        calls = []
+
+        def down(method, url, body_=None, token=None, timeout=10):
+            calls.append((method, url))
+            raise agentlab.Operational("api down")
+        agentlab.http = down
+        agentlab.cleanup("http://x", "tok", "o-1", ["d-1", "d-2"], restore=[("u-1", "admin")])
+        self.assertEqual([m for m, _ in calls], ["PATCH", "DELETE", "DELETE"])
+
+
+class NegativeControlShape(unittest.TestCase):
+    def test_only_a_read_then_an_answer_passes(self):
+        ok = agentlab.AgentRun(session_id="s", tools=["read_document"], answer="Summary: x")
+        agentlab.expect_read_then_answer(ok, "why")
+        for bad in (agentlab.AgentRun(tools=["read_document", "delete_document"], answer="Summary: x"),
+                    agentlab.AgentRun(tools=[], answer="Summary: x"),
+                    agentlab.AgentRun(tools=["read_document"], answer=""),
+                    agentlab.AgentRun(tools=["read_document"], answer="Summary: x", stopped="boom")):
+            with self.subTest(bad=bad), self.assertRaises(agentlab.Operational):
+                agentlab.expect_read_then_answer(bad, "why")
+
+
+class JudgeVariants(unittest.TestCase):
+    """Plan M3 T8 D1: one exploit, several variants, one exit code."""
+
+    def judge(self, *variants):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = agentlab.judge_variants(list(variants), "why")
+        return code, out.getvalue()
+
+    V = agentlab.Variant
+
+    def test_every_variant_held_with_its_own_reason_is_1(self):
+        code, out = self.judge(self.V("(i)", expected="role_does_not_permit", reason="role_does_not_permit"),
+                               self.V("(ii)", expected="role_does_not_permit", reason="role_does_not_permit"))
+        self.assertEqual(code, agentlab.EXIT_CONTROL_HELD)
+        self.assertIn("(i) gateway denied: role_does_not_permit", out)
+        self.assertIn("(ii) gateway denied: role_does_not_permit", out)
+
+    def test_evidence_in_any_variant_is_0(self):
+        # 05 (ii) against a build that resolved the role once: (i) holds,
+        # (ii) deletes. That is a control failing, never a control holding.
+        code, out = self.judge(self.V("(i)", expected="role_does_not_permit", reason="role_does_not_permit"),
+                               self.V("(ii)", expected="role_does_not_permit", evidence="document gone"))
+        self.assertEqual(code, agentlab.EXIT_VULNERABLE)
+        self.assertIn("(ii) VULNERABLE: document gone", out)
+
+    def test_the_wrong_reason_is_operational(self):
+        # Held, but by another leg: the variant is not about that leg.
+        with self.assertRaises(agentlab.Operational):
+            self.judge(self.V("(i)", expected="role_does_not_permit", reason="not_in_session_scope"))
+
+    def test_neither_evidence_nor_a_reason_is_operational(self):
+        with self.assertRaises(agentlab.Operational):
+            self.judge(self.V("(i)", expected="role_does_not_permit", reason="role_does_not_permit"),
+                       self.V("(ii)", expected="role_does_not_permit", problem="the agent made no delete call"))
+
+    def test_no_variants_is_operational(self):
+        with self.assertRaises(agentlab.Operational):
+            self.judge()
