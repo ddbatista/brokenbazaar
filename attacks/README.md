@@ -40,8 +40,9 @@ amended here rather than bent quietly:
   `--collector-url`. Its default, `http://localhost:9100`, is where `docker-compose.yml` publishes
   the collector. `run.py` passes only `--base-url`, so CI always uses that default: the port is a
   default, not configurable in CI. Needs the docker CLI, which the stack needs anyway.
-- **Rule 5, idempotent:** each run opens a **fresh** agent session
-  (`agent -org … -acting-for … -message … -scope …`). A session shows an attack on its first run only,
+- **Rule 5, idempotent:** each run opens **fresh** agent sessions
+  (`agent -org … -acting-for … -message … -scope …`), and continues only sessions it opened itself
+  (05 (ii), below). A session shows an attack on its first run only,
   because the scripted model reads the stored transcript, and CI runs both modes against one seed.
   Collector receipts are judged by the collector's **sequence number** before and after the run,
   never by clearing shared state. It is not judged by list length, because the collector keeps
@@ -50,14 +51,36 @@ amended here rather than bent quietly:
   SR-B3-5). There is no default: each exploit declares a `SCOPE` for the flow it needs. Since M3 T6
   made scope a policy check, that is what lets each M2 finding still die at its own check and keep
   asserting its own denial reason (`threat-models/m3-delegation.md` D7).
-- **Rule 5, self-cleaning: does NOT hold, by design.** Every run leaves its two or three sessions,
-  their messages and tool calls, its audit records and its collector receipts behind. Sessions are
-  the platform's record of what an agent did on a user's behalf. There is no delete path for them,
-  and an exploit that erased its own audit trail would be teaching the wrong lesson. `make down`
-  resets everything.
+- **Rule 5, self-cleaning: does NOT hold for the record, by design.** Every run leaves its
+  sessions (two to six, depending on the finding), their messages and tool calls, its audit records
+  and its collector receipts behind. Sessions are the platform's record of what an agent did on a
+  user's behalf. There is no delete path for them, and an exploit that erased its own audit trail
+  would be teaching the wrong lesson. What an exploit **creates** to attack with (05 and 06's
+  per-run documents) and the **roles** it changes are put back at the end, best effort; a run killed
+  mid-way leaves them, and the next run's preconditions reset the roles. `make down` resets
+  everything.
 - **Time budget:** an agent exploit builds an image and runs several one-shot containers, so
   `expected.json` may declare `timeout_s`, which `run.py` honours (03 and 04 declare 300; the API
   exploits keep the 120s default).
+
+- **Continuing a session (M3 T8):** `agent -org … -session S -message M` stores the user's next
+  request in an existing session and runs it (`agentlab.resume`). Finding 05 (ii) needs it: a
+  session opened while its user was an admin asks for the delete after the user is demoted. The
+  session's user, org and scope stay the row's.
+- **Variants (M3 T8):** one finding may run several variants in one exploit (05 (i)/(ii); 03 and
+  its least-privilege variant). Each prints its own labelled verdict, and `agentlab.judge_variants`
+  gives one exit code: **0** if *any* variant shows evidence, **1** only if *every* variant was
+  refused for the reason it is about, **2** otherwise. `expected.json`'s `stdout_contains` may then
+  be a **list**: every marker of the run's mode must appear, and none of the other mode's may
+  (`run.judge`), so a run where one variant held and another leaked cannot pass on the one that
+  behaved.
+- **Roles (M3 T8, rule 5):** an exploit sets every role it relies on at the start, to the seeded
+  value, through the org owner's **direct** admin route (idempotent), and puts the roles its attack
+  changes back to the seeded value at the end. The restore is an audited change, not an erased one.
+  Positive controls run in both modes: a denial is evidence only where the check it names is shown
+  to allow (plan M3 T0 D3). 06's positive control is the owner's **direct** change, by design: it
+  separates *not delegable* from *forbidden*; its exploit also requires the denial to have been made
+  on `role_now=admin`, so it cannot be the role check's.
 
 **Two views, kept apart.** Evidence comes from the **attacker's** side: what reached the collector,
 and what came back in the agent's reply. The **defender's** record (`gateway.jsonl`, filtered to the
@@ -84,8 +107,8 @@ Shared code for both lives in `attacks/agentlab.py`, with its parsers tested in
 **Two checks run after the suites (M2 T8), and neither is an exploit:**
 - `leakscan.py` (`make leakscan`, MCP01): no platform secret and no JWT in any audit store.
 - `faults.py` (`make faults`): breaks the gate for real (OPA removed, then the gateway stopped).
-  Every agent exploit must then exit **2**; an exit 1 under a fault is a silent pass and fails the
-  check.
+  Exploits 03 and 04 must then exit **2**; an exit 1 under a fault is a silent pass and fails the
+  check. 05 and 06 join this check at M3 T9.
 
 Their judging logic is tested in `attacks/test_ci_checks.py`. They live beside the exploits, not in
 `0*-*/`, so `run.py`'s glob never mistakes them for findings.
@@ -141,10 +164,10 @@ That last field is the dataset for the M6 AI-assisted-development writeup. It on
 |---|---|---|---|
 | 01 | cross-tenant read | B2 | M1 |
 | 02 | jwt org claim | B1, B2 | M1 |
-| 03 | indirect injection | B4, B5 | M2 |
+| 03 | indirect injection | B4, B5 (+ B3, the least-privilege variant) | M2, M3 |
 | 04 | ssrf metadata | B5, B7 | M2 |
 | 05 | confused deputy | B3, B5 | M3 |
-| 06 | policy plane | B8 | M3 |
+| 06 | policy plane | B3, B8 | M3 |
 | 07 | tool poisoning | B6 | M4a |
 | 08 | rug pull | B6 | M4a |
 | 09 | skill injection | B9 | M4b |

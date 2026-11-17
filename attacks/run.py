@@ -22,6 +22,11 @@ modification -- the same paved-road argument as store.ForOrg(ctx): a rule
 you satisfy by adding an artifact beats a rule you satisfy by remembering
 to edit a list.
 
+A finding with variants (M3 T8 D1: 05 (i)/(ii), 03 and its least-
+privilege variant) lists one marker per variant: every marker of this mode
+must appear, and no marker of the other mode may, so a run where one
+variant held and the other leaked cannot pass on the variant that behaved.
+
 Each run also cross-asserts the OPPOSITE mode's marker is absent, so a PoC
 that prints "CONTROL HOLDS" in vulnerable mode (or the leaked-title evidence
 in hardened mode) fails even if its exit code happens to match. Exit codes
@@ -46,6 +51,39 @@ def findings():
     )
 
 
+def markers(spec):
+    """stdout_contains as a list: one string, or a list of them (M3 T8 D1).
+
+    Blank markers are dropped, so an empty or blank spec yields [] -- which
+    judge() refuses, because a marker list that asserts nothing passes
+    every run.
+    """
+    items = [spec] if isinstance(spec, str) else list(spec)
+    return [m for m in items if isinstance(m, str) and m.strip()]
+
+
+def judge(expected, mode, returncode, stdout):
+    """The problems with one run against its expected.json, [] if none."""
+    want = expected[mode]
+    other = expected["hardened" if mode == "vulnerable" else "vulnerable"]
+    problems = []
+    if returncode != want["exit_code"]:
+        problems.append(
+            f"exit code {returncode}, expected {want['exit_code']}"
+            + (" (exploit reported an operational error -- an outage is a suite failure, not a verdict)" if returncode == 2 else "")
+        )
+    mine = markers(want["stdout_contains"])
+    if not mine:
+        problems.append(f"expected.json declares no {mode} marker -- it would assert nothing")
+    for marker in mine:
+        if marker not in stdout:
+            problems.append(f"stdout missing expected evidence: {marker!r}")
+    for marker in markers(other["stdout_contains"]):
+        if marker in stdout:
+            problems.append(f"stdout contains the OTHER mode's marker {marker!r}")
+    return problems
+
+
 def run_one(d, mode, base_url):
     """Run one exploit and assert its expected.json for this mode.
 
@@ -57,8 +95,6 @@ def run_one(d, mode, base_url):
     except (OSError, ValueError) as e:
         return False, f"unreadable expected.json: {e}"
 
-    want = expected[mode]
-    other = expected["hardened" if mode == "vulnerable" else "vulnerable"]
     # A finding may declare a longer budget: the agent exploits (03, 04)
     # build an image and run several one-shot containers, which a cold CI
     # runner cannot do in the API exploits' 120s (T7 review). Declared in
@@ -73,18 +109,7 @@ def run_one(d, mode, base_url):
     except subprocess.TimeoutExpired:
         return False, f"exploit timed out after {timeout}s (operational)"
 
-    problems = []
-    if proc.returncode != want["exit_code"]:
-        problems.append(
-            f"exit code {proc.returncode}, expected {want['exit_code']}"
-            + (" (exploit reported an operational error -- an outage is a suite failure, not a verdict)" if proc.returncode == 2 else "")
-        )
-    if want["stdout_contains"] not in proc.stdout:
-        problems.append(f"stdout missing expected evidence: {want['stdout_contains']!r}")
-    if other["stdout_contains"] in proc.stdout:
-        problems.append(
-            f"stdout contains the OTHER mode's marker {other['stdout_contains']!r}"
-        )
+    problems = judge(expected, mode, proc.returncode, proc.stdout)
 
     detail = "; ".join(problems) if problems else ""
     if problems and proc.stdout.strip():

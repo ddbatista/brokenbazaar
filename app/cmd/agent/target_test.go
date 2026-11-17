@@ -22,6 +22,23 @@ func TestTargetRunsAnExistingSession(t *testing.T) {
 	}
 }
 
+// Plan M3 T8 D2: -session with -message continues an existing session
+// with the user's next request -- a chat's next turn, in the same session.
+// 05 (ii) needs it: the session is opened while its user is an admin, the
+// user is demoted, and the SAME session then asks for the delete.
+func TestTargetContinuesAnExistingSessionWithANewMessage(t *testing.T) {
+	got, err := parseTarget("o1", "s1", "", "  delete document d1  ", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.fresh() || got.sessionID != "s1" || got.message != "delete document d1" {
+		t.Errorf("got %+v", got)
+	}
+	if got.actingFor != "" || got.scope != nil {
+		t.Errorf("a continued session takes its user and scope from its row, got %+v", got)
+	}
+}
+
 func TestTargetOpensAFreshSession(t *testing.T) {
 	got, err := parseTarget("o1", "", "u1", "  Please summarise document d1  ", "read_document")
 	if err != nil {
@@ -60,6 +77,7 @@ func TestTargetRefusesAmbiguousOrIncompleteFlags(t *testing.T) {
 		// -scope with -session would silently be ignored: an existing
 		// session's scope is on its row and has no update path (SR-B3-6).
 		{"scope with session", "o1", "s1", "", "", "read_document", "-scope"},
+		{"scope with a continued session", "o1", "s1", "", "delete document d1", "read_document,delete_document", "-scope"},
 	}
 	for _, c := range cases {
 		_, err := parseTarget(c.org, c.session, c.actingFor, c.message, c.scope)

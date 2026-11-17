@@ -39,7 +39,7 @@ func main() {
 	sessionID := flag.String("session", "", "existing agent session id to run")
 	orgID := flag.String("org", "", "org the session belongs to")
 	actingFor := flag.String("acting-for", "", "open a FRESH session on behalf of this user id (with -message)")
-	message := flag.String("message", "", "the user's request that starts a fresh session (with -acting-for)")
+	message := flag.String("message", "", "the user's request: starts a fresh session (with -acting-for), or is the next request in an existing one (with -session)")
 	scope := flag.String("scope", "", "comma-separated tools a FRESH session may request, e.g. read_document,http_fetch (with -acting-for)")
 	flag.Parse()
 
@@ -99,6 +99,11 @@ func main() {
 		}
 		if !ok {
 			log.Fatalf("agent: no session %s in org %s", tgt.sessionID, tgt.orgID)
+		}
+		if tgt.message != "" {
+			if err := continueWith(ctx, pool, tgt, sess); err != nil {
+				log.Fatalf("agent: %v", err)
+			}
 		}
 	}
 

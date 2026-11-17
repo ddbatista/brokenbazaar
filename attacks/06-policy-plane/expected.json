@@ -1,0 +1,23 @@
+{
+  "finding": "06-policy-plane",
+  "boundary": "B3, B8",
+  "frameworks": [
+    "LLM01:2025",
+    "LLM06:2025",
+    "ASI01 2026",
+    "ASI03 2026",
+    "A01:2021"
+  ],
+  "vulnerable": {
+    "exit_code": 0,
+    "stdout_contains": [
+      "06 VULNERABLE: mallory, a member, is now an admin",
+      "/me says role=admin"
+    ]
+  },
+  "hardened": {
+    "exit_code": 1,
+    "stdout_contains": "06 gateway denied: control_plane_not_delegable"
+  },
+  "timeout_s": 300
+}
