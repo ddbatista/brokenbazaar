@@ -12,6 +12,10 @@
 # other legs passing, so the reason is the leg's own) and allowed. A leg
 # tested only for its deny cannot be told apart from a leg that denies
 # everything (the plan's M3 T0 D3 and T6 acceptance line).
+#
+# M3 T7: the delegability leg. Its allow side is every allow test in this
+# file (no document tool is on the list, pinned below); its deny side is
+# set_member_role, refused even where every other leg would allow it.
 
 package bazaar.gate_test
 
@@ -24,7 +28,7 @@ acme := "0a000000-0000-4000-8000-000000000001"
 initech := "0a000000-0000-4000-8000-000000000003"
 
 policy_data := {
-	"tools": ["read_document", "http_fetch", "update_document", "delete_document"],
+	"tools": ["read_document", "http_fetch", "update_document", "delete_document", "set_member_role"],
 	"org_grants": {
 		acme: ["read_document", "http_fetch", "update_document", "delete_document"],
 		initech: ["read_document"],
@@ -242,11 +246,86 @@ test_an_unknown_tool_is_denied if {
 	decide(call("exfiltrate", {})).reasons == ["unknown_tool"]
 }
 
-# set_member_role is not a known tool until T7 lists it -- and T7 lists it
-# only to deny it explicitly (control_plane_not_delegable). Until then it
-# dies here, even for an admin whose every authority leg passes.
-test_set_member_role_is_unknown_until_t7 if {
-	decide(call("set_member_role", {})).reasons == ["unknown_tool"]
+# A tool missing from data.tools dies here, before delegability: the tool
+# leg is first. (set_member_role IS listed, so it reaches its own leg --
+# see the delegability section.)
+test_unknown_tool_comes_before_delegability if {
+	d := gate.decision with input as call("set_member_role", {})
+		with data.tools as ["read_document", "http_fetch", "update_document", "delete_document"]
+		with data.org_grants as policy_data.org_grants
+		with data.egress_allowlist as policy_data.egress_allowlist
+	d.reasons == ["unknown_tool"]
+}
+
+# --- delegability (M3 T7; m3-delegation.md D6) ------------------------
+
+# Finding 06's hardened reason, against the data the gateway ships (no
+# `with data` overrides): an admin's session, every authority leg passing.
+# The role leg would allow this -- an admin may change roles directly --
+# so the denial is delegability's alone.
+test_set_member_role_is_not_delegable_on_the_shipped_data if {
+	d := gate.decision with input as call("set_member_role", {})
+	d.route == "deny"
+	d.reasons == ["control_plane_not_delegable"]
+}
+
+# SR-B8-2's "explicit, not by accident": set_member_role is a KNOWN tool,
+# so its denial is the denylist's, never unknown_tool's.
+test_set_member_role_is_a_known_tool if {
+	"set_member_role" in data.tools
+}
+
+# Even granted to the org, in scope, and the requester an admin, it is
+# refused: the denylist alone denies it. Granting it is a mistake the
+# shipped data does not make (next test); this proves the leg does not
+# depend on that.
+test_non_delegable_even_when_granted_in_scope_and_admin if {
+	granted := object.union(policy_data.org_grants, {acme: array.concat(policy_data.org_grants[acme], ["set_member_role"])})
+	d := gate.decision with input as call("set_member_role", {})
+		with data.tools as policy_data.tools
+		with data.org_grants as granted
+		with data.egress_allowlist as policy_data.egress_allowlist
+	d.reasons == ["control_plane_not_delegable"]
+}
+
+# The third layer (M3 T7 D2): no org in the shipped data is granted a
+# control-plane tool. Read from data.json itself, not from policy_data.
+test_no_org_is_granted_a_non_delegable_tool if {
+	every _, tools in data.org_grants {
+		every tool in gate.non_delegable {
+			not tool in tools
+		}
+	}
+}
+
+# Order: delegability outranks every session and org leg, so an attempt at
+# a control-plane action is never reported as an ordinary expiry, scope or
+# grant failure (the attempt is what T10 detects).
+test_delegability_comes_before_every_session_leg if {
+	none := {"within_time": false, "in_scope": false, "role_permits": false}
+	decide(with_legs("set_member_role", none)).reasons == ["control_plane_not_delegable"]
+	inp := object.union(with_legs("set_member_role", none), {"session": {"id": "s-2", "org": initech, "acting_for": "u-2"}})
+	decide(inp).reasons == ["control_plane_not_delegable"]
+	decide(json.remove(call("set_member_role", {}), ["authority"])).reasons == ["control_plane_not_delegable"]
+}
+
+# The denylist is not policy data (M3 T7 D1): data that tries to empty or
+# replace it changes nothing.
+test_the_denylist_is_not_policy_data if {
+	d := gate.decision with input as call("set_member_role", {})
+		with data.non_delegable as []
+		with data.tools as policy_data.tools
+		with data.org_grants as policy_data.org_grants
+		with data.egress_allowlist as policy_data.egress_allowlist
+	d.reasons == ["control_plane_not_delegable"]
+}
+
+# The allow side: no data-plane tool is on the list. Every allow test
+# above depends on it; this names it.
+test_no_document_tool_is_non_delegable if {
+	every tool in ["read_document", "http_fetch", "update_document", "delete_document"] {
+		not tool in gate.non_delegable
+	}
 }
 
 # Empty input must not be an allow. A policy whose empty case allows is
