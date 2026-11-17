@@ -51,16 +51,25 @@ DOCKER_TIMEOUT_S = 90
 
 # The reasons gateway/policy/policy.rego can give -- the only denials
 # that mean a CONTROL held. The gateway also denies, correctly and fail
-# closed, when it cannot decide at all (opa_unavailable when OPA is dead,
-# enrichment_failed when DNS fails); those say the gate was broken, not
+# closed, when it cannot decide at all (opa_unavailable when OPA is dead;
+# enrichment_failed when DNS fails, or since M3 T6 when the session's
+# authority cannot be established -- an unknown session, an unreachable
+# or misbehaving authority route); those say the gate was broken, not
 # that it judged, and must exit 2. Found at T7 review: the first version
 # accepted any deny, so killing OPA mid-run -- T8's fault-injection case
 # -- would have printed CONTROL HOLDS. A reason not listed here is
 # treated as operational: a new policy leg should be added deliberately,
 # not absorbed by default.
+#
+# M3 T6 retired capability_denied and added the four per-session authority
+# legs (m3-delegation.md D4); TestPolicyReasonsMatchThePolicy holds this
+# set to policy.rego's leg_order, so the two cannot drift again.
 POLICY_REASONS = frozenset({
-    "capability_denied",
     "unknown_tool",
+    "session_expired",
+    "not_in_session_scope",
+    "org_grant_absent",
+    "role_does_not_permit",
     "egress_not_allowlisted",
     "resolved_address_denied",
     "tenant_data_egress",

@@ -14,6 +14,7 @@ pass against both.
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from tools import documents, fetch
@@ -230,21 +231,24 @@ class Schemes(unittest.TestCase):
 class ReadDocument(unittest.TestCase):
     """D5b: mediation is the secret, enforced at the auth layer."""
 
-    def test_the_service_secret_is_sent(self):
+    def test_the_service_secret_and_the_session_are_sent(self):
         seen = {}
 
-        def fake(api_base, path, headers, timeout):
-            seen["path"] = path
-            seen["headers"] = headers
+        def fake(api_base, method, path, headers, data, timeout):
+            seen.update(method=method, path=path, headers=headers)
             return 200, '{"id":"d1","title":"t","body":"b"}'
 
-        result = documents.read_document("d1", "acme", api_base="http://api:8080",
+        result = documents.read_document("d1", "s-1", api_base="http://api:8080",
                                          tools_secret="s3cret", request=fake)
 
         self.assertTrue(result.allowed)
+        self.assertEqual(seen["method"], "GET")
         self.assertEqual(seen["headers"]["Authorization"], "Bearer s3cret")
         self.assertIn("id=d1", seen["path"])
-        self.assertIn("org=acme", seen["path"])
+        # Plan M3 T6 D4: the route names the SESSION; the API resolves the org
+        # from the session row. No org is sent at all.
+        self.assertIn("session=s-1", seen["path"])
+        self.assertNotIn("org=", seen["path"])
 
     def test_a_missing_secret_fails_before_any_request(self):
         called = False
@@ -254,18 +258,19 @@ class ReadDocument(unittest.TestCase):
             called = True
             return 200, "{}"
 
-        result = documents.read_document("d1", "acme", api_base="http://api:8080",
-                                         tools_secret="", request=fake)
-
-        self.assertFalse(result.allowed)
-        self.assertEqual(result.reason, documents.TOOLS_SECRET_MISSING)
+        for call in (lambda: documents.read_document("d1", "s", api_base="http://api:8080", tools_secret="", request=fake),
+                     lambda: documents.update_document("d1", "b", "s", api_base="http://api:8080", tools_secret="", request=fake),
+                     lambda: documents.delete_document("d1", "s", api_base="http://api:8080", tools_secret="", request=fake)):
+            result = call()
+            self.assertFalse(result.allowed)
+            self.assertEqual(result.reason, documents.TOOLS_SECRET_MISSING)
         self.assertFalse(called, "no request may be issued without a credential")
 
     def test_a_refused_credential_is_reported_as_a_refusal(self):
         # Not as an empty document. A gateway that reported 401 as
         # "document not found" would make a broken deployment look like
         # a missing row.
-        result = documents.read_document("d1", "acme", api_base="http://api:8080",
+        result = documents.read_document("d1", "s", api_base="http://api:8080",
                                          tools_secret="wrong",
                                          request=lambda *a, **k: (401, ""))
         self.assertFalse(result.allowed)
@@ -274,11 +279,52 @@ class ReadDocument(unittest.TestCase):
     def test_wrong_org_and_missing_document_are_indistinguishable(self):
         # SR-M1-4 one layer up: OrgStore.Get cannot tell them apart, so
         # neither can this, and the reason string says so.
-        result = documents.read_document("d1", "globex", api_base="http://api:8080",
+        result = documents.read_document("d1", "s", api_base="http://api:8080",
                                          tools_secret="s3cret",
                                          request=lambda *a, **k: (404, ""))
         self.assertFalse(result.allowed)
         self.assertEqual(result.reason, documents.DOCUMENT_NOT_FOUND)
+
+    def test_an_unreachable_api_is_reported_not_raised(self):
+        def down(*_a, **_k):
+            raise ConnectionRefusedError("refused")
+        result = documents.read_document("d1", "s", api_base="http://api:8080",
+                                         tools_secret="s3cret", request=down)
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, documents.INTERNAL_ROUTE_UNAVAILABLE)
+
+
+class WriteDocuments(unittest.TestCase):
+    """Plan M3 T6 D4: the write tools' clients, and the re-check at execution."""
+
+    def test_update_and_delete_post_the_session_and_never_an_org(self):
+        seen = []
+
+        def fake(api_base, method, path, headers, data, timeout):
+            seen.append((method, path, json.loads(data), headers.get("Content-Type")))
+            return (200, '{"id":"d1","title":"t","body":"new"}') if "update" in path else (204, "")
+
+        up = documents.update_document("d1", "new", "s-1", api_base="http://api:8080",
+                                       tools_secret="s3cret", request=fake)
+        rm = documents.delete_document("d1", "s-1", api_base="http://api:8080",
+                                       tools_secret="s3cret", request=fake)
+        self.assertTrue(up.allowed)
+        self.assertTrue(rm.allowed)
+        self.assertEqual(seen[0], ("POST", "/internal/tools/update_document",
+                                   {"session": "s-1", "id": "d1", "body": "new"}, "application/json"))
+        self.assertEqual(seen[1], ("POST", "/internal/tools/delete_document",
+                                   {"session": "s-1", "id": "d1"}, "application/json"))
+
+    def test_a_refusal_at_execution_names_the_leg(self):
+        # M3-N2: the gate allowed it, the API's re-check refused it. That is
+        # neither a missing document nor a broken credential, and saying so
+        # is what lets the audit record show authority changed mid-call.
+        result = documents.delete_document(
+            "d1", "s-1", api_base="http://api:8080", tools_secret="s3cret",
+            request=lambda *a, **k: (403, '{"error":"refused at execution","reason":"role_does_not_permit"}'))
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.reason, documents.REFUSED_AT_EXECUTION)
+        self.assertEqual(result.detail, "role_does_not_permit")
 
 
 if __name__ == "__main__":

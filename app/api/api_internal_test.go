@@ -37,7 +37,7 @@ func serviceRoute(secret string) http.HandlerFunc {
 
 func callWith(t *testing.T, h http.HandlerFunc, authHeader string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/internal/tools/read_document?id=d1&org=acme", nil)
+	req := httptest.NewRequest(http.MethodGet, "/internal/tools/read_document?session=s1&id=d1", nil)
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}

@@ -38,6 +38,11 @@ import (
 )
 
 type seedOrg struct {
+	// id is fixed, not generated (plan M3 T6 D6): gateway/policy/data.json
+	// keys each org's tool grants by org id (m3-delegation.md D9), and an
+	// org it does not list is granted nothing. TestSeedOrgsMatchPolicyGrants
+	// holds the two files together.
+	id   string
 	name string
 	// one user per role, in a fixed order so printed output and
 	// attacks/NN-*/expected.json can both rely on it.
@@ -78,9 +83,18 @@ var q3Revenue = map[string]struct{ short, revenue string }{
 	"Initech":   {"Initech", "$2.1M"},
 }
 
+// The seeded orgs' fixed ids. Readable on purpose: they appear in
+// gateway/policy/data.json, which a human reviews as a diff.
+const (
+	acmeOrgID    = "0a000000-0000-4000-8000-000000000001"
+	globexOrgID  = "0a000000-0000-4000-8000-000000000002"
+	initechOrgID = "0a000000-0000-4000-8000-000000000003"
+)
+
 func seedData() []seedOrg {
 	return []seedOrg{
 		{
+			id:   acmeOrgID,
 			name: "Acme Corp",
 			users: []seedUser{
 				{"admin@acme.example", "Acme Admin", store.RoleAdmin, false},
@@ -93,6 +107,7 @@ func seedData() []seedOrg {
 			},
 		},
 		{
+			id:   globexOrgID,
 			name: "Globex",
 			users: []seedUser{
 				{"admin@globex.example", "Globex Admin", store.RoleAdmin, false},
@@ -101,6 +116,7 @@ func seedData() []seedOrg {
 			},
 		},
 		{
+			id:   initechOrgID,
 			name: "Initech",
 			users: []seedUser{
 				{"admin@initech.example", "Initech Admin", store.RoleAdmin, false},
@@ -134,7 +150,7 @@ func main() {
 	admin := store.NewAdminStore(pool)
 
 	for _, so := range seedData() {
-		org, err := admin.CreateOrg(ctx, so.name)
+		org, err := admin.CreateOrgWithID(ctx, so.id, so.name)
 		if err != nil {
 			log.Fatalf("seed: %v", err)
 		}

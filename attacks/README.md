@@ -47,9 +47,9 @@ amended here rather than bent quietly:
   never by clearing shared state. It is not judged by list length, because the collector keeps
   1000 records and at that cap its length stops moving.
 - **Session scope (M3 T2):** every fresh session states the tools it may request (`-scope`,
-  SR-B3-5). There is no default: each exploit declares a `SCOPE` for the flow it needs, so that once
-  M3 T6 makes scope a check, each M2 finding still dies at its own check, and keeps asserting its own
-  denial reason (`threat-models/m3-delegation.md` D7).
+  SR-B3-5). There is no default: each exploit declares a `SCOPE` for the flow it needs. Since M3 T6
+  made scope a policy check, that is what lets each M2 finding still die at its own check and keep
+  asserting its own denial reason (`threat-models/m3-delegation.md` D7).
 - **Rule 5, self-cleaning: does NOT hold, by design.** Every run leaves its two or three sessions,
   their messages and tool calls, its audit records and its collector receipts behind. Sessions are
   the platform's record of what an agent did on a user's behalf. There is no delete path for them,

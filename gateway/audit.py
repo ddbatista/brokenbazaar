@@ -78,7 +78,7 @@ class Audit:
             os.fsync(fh.fileno())
 
     def pre(self, *, tool, args, session, provenance, resolved, route,
-            reasons, detail="") -> str:
+            reasons, detail="", authority=None) -> str:
         """Write the pre-record and return its id.
 
         The id is generated, embedded in the record, and written -- and
@@ -107,6 +107,11 @@ class Audit:
         }
         if resolved:
             record["resolved"] = resolved
+        if authority:
+            # SR-B3-9 (m3-delegation.md §3): the role read AT ACTION TIME and
+            # every authority leg, as the decision saw them. 05 (ii) reads
+            # the demotion from these records rather than asserting it (D5).
+            record["authority"] = authority
         if detail:
             record["detail"] = detail
         self._write(record)

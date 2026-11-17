@@ -74,7 +74,30 @@ def schema_path() -> Path:
     return HERE.parent / "app" / "redact" / "redact.json"
 
 
-def make_config(tmp, *, opa_path=None, opa_timeout=5.0):
+# The authority every gate test runs under unless it says otherwise: the
+# acting session's row, with every leg passing (plan M3 T6 D3). The gate asks the
+# API for this before it decides; the tests answer for the API, so they stay
+# offline, and a test about one leg changes only that leg.
+ACME = "0a000000-0000-4000-8000-000000000001"  # the seed's fixed id (plan M3 T6 D6)
+
+PASSING_AUTHORITY = {
+    "session": {"id": "s-1", "org": ACME, "acting_for": "u-1"},
+    "role_now": "member",
+    "legs": {"within_time": True, "in_scope": True, "role_permits": True},
+}
+
+
+def authority_answering(answer=PASSING_AUTHORITY, err=""):
+    calls = []
+
+    def fake(session_id, tool):
+        calls.append((session_id, tool))
+        return (None, err) if err else (json.loads(json.dumps(answer)), "")
+    fake.calls = calls
+    return fake
+
+
+def make_config(tmp, *, opa_path=None, opa_timeout=5.0, authority=None):
     schema = redact_mod.Schema.load(schema_path())
     audit = audit_mod.Audit.open(Path(tmp) / "audit" / "gateway.jsonl", schema)
     policy_data = {}
@@ -90,6 +113,7 @@ def make_config(tmp, *, opa_path=None, opa_timeout=5.0):
         tools_secret="test-secret",
         opa_path=opa_path or OPA,
         opa_timeout=opa_timeout,
+        authority_lookup=authority or authority_answering(),
     )
 
 
@@ -97,7 +121,7 @@ def fetch_payload(url, derived_from=("user",)):
     return {
         "tool": "http_fetch",
         "args": {"url": url},
-        "session": {"id": "s-1", "org": "acme", "acting_for": "u-1"},
+        "session": {"id": "s-1"},
         "provenance": {"derived_from": list(derived_from)},
     }
 
@@ -206,13 +230,18 @@ class PolicyDecisions(unittest.TestCase):
     """The real OPA, the real shipped policy, both M2 findings."""
 
     def decide(self, payload, resolved):
+        # The input the gate builds: the ROW's session and the authority
+        # legs (plan M3 T6 D3), every leg passing, so M2's findings die at the
+        # egress legs exactly as before.
         return decide_mod.decide(
             {
                 "tool": payload["tool"],
                 "args": payload["args"],
-                "session": payload["session"],
+                "session": PASSING_AUTHORITY["session"],
                 "provenance": payload["provenance"],
                 "resolved": resolved,
+                "authority": {"role_now": PASSING_AUTHORITY["role_now"],
+                              "legs": PASSING_AUTHORITY["legs"]},
             },
             policy_dir=str(POLICY_DIR), opa_path=OPA)
 
@@ -425,6 +454,160 @@ class WireContract(unittest.TestCase):
             status, body = gate_mod.handle_gate(cfg, fetch_payload("http://127.0.0.1/a"))
             self.assertGreaterEqual(status, 500)
             self.assertNotIn("route", body)
+
+
+class AuthorityWiring(unittest.TestCase):
+    """Plan M3 T6 D3: the gate decides on the session ROW, never the payload."""
+
+    def capture_decide(self):
+        seen = {}
+        original = decide_mod.decide
+
+        def fake(inp, **_kw):
+            seen["input"] = inp
+            return decide_mod.Decision("allow", ["policy_satisfied"])
+        decide_mod.decide = fake
+        self.addCleanup(setattr, decide_mod, "decide", original)
+        return seen
+
+    def stub_execute(self):
+        calls = []
+        original = gate_mod.execute
+        gate_mod.execute = lambda cfg, tool, args, session: calls.append((tool, session)) or ("ok", "t", "s")
+        self.addCleanup(setattr, gate_mod, "execute", original)
+        return calls
+
+    def test_the_payloads_org_and_acting_user_are_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lookup = authority_answering()
+            cfg = make_config(tmp, authority=lookup)
+            seen = self.capture_decide()
+            calls = self.stub_execute()
+            payload = {"tool": "read_document", "args": {"id": "d1"},
+                       "session": {"id": "s-1", "org": "globex", "acting_for": "u-attacker"},
+                       "provenance": {"derived_from": ["user"]}}
+            status, body = gate_mod.handle_gate(cfg, payload)
+
+            self.assertEqual((status, body["route"]), (200, "allow"))
+            self.assertEqual(lookup.calls, [("s-1", "read_document")])
+            # The policy sees the ROW's session and the authority legs.
+            self.assertEqual(seen["input"]["session"], PASSING_AUTHORITY["session"])
+            self.assertEqual(seen["input"]["authority"]["legs"], PASSING_AUTHORITY["legs"])
+            # The record attributes the call to the row's org and user.
+            rec = read_lines(cfg.audit.path)[0]
+            self.assertEqual((rec["session"], rec["org"], rec["acting_for"]), ("s-1", ACME, "u-1"))
+            # And execution runs in the row's session, not the payload's.
+            self.assertEqual(calls, [("read_document", PASSING_AUTHORITY["session"])])
+
+    def test_the_pre_record_carries_the_authority_the_decision_used(self):
+        # SR-B3-9: the role read AT ACTION TIME and every leg are in the
+        # record. 05 (ii) reads the demotion from here (m3-delegation.md D5).
+        with tempfile.TemporaryDirectory() as tmp:
+            demoted = json.loads(json.dumps(PASSING_AUTHORITY))
+            demoted["role_now"] = "viewer"
+            demoted["legs"]["role_permits"] = False
+            cfg = make_config(tmp, authority=authority_answering(demoted))
+            self.capture_decide()
+            self.stub_execute()
+            gate_mod.handle_gate(cfg, {"tool": "delete_document", "args": {"id": "d1"},
+                                       "session": {"id": "s-1"}, "provenance": {"derived_from": ["user"]}})
+            rec = read_lines(cfg.audit.path)[0]
+            self.assertEqual(rec["authority"], {"role_now": "viewer", "legs": demoted["legs"]})
+
+    def test_an_unnamed_tool_reaches_the_policy_unasked(self):
+        # M2's reason for an unnamed tool is unknown_tool. Asking the
+        # authority route about "" would turn it into enrichment_failed.
+        with tempfile.TemporaryDirectory() as tmp:
+            lookup = authority_answering()
+            cfg = make_config(tmp, authority=lookup)
+            seen = self.capture_decide()
+            gate_mod.handle_gate(cfg, {"tool": "", "args": {}, "session": {"id": "s-1"},
+                                       "provenance": {"derived_from": ["user"]}})
+            self.assertEqual(lookup.calls, [])
+            self.assertEqual(seen["input"]["authority"], {}, "no legs, so every leg reads as failing")
+
+    def test_a_lookup_that_answers_nothing_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(tmp, authority=lambda sid, tool: (None, ""))
+            calls = self.stub_execute()
+            status, body = gate_mod.handle_gate(cfg, {"tool": "read_document", "args": {"id": "d1"},
+                                                      "session": {"id": "s-1"}, "provenance": {"derived_from": ["user"]}})
+            self.assertEqual((status, body["route"], calls), (200, "deny", []))
+            self.assertEqual(read_lines(cfg.audit.path)[0]["reasons"], ["enrichment_failed"])
+
+    def test_a_refusal_at_execution_is_its_own_outcome(self):
+        # M3-N2: the gate allowed it, the API's re-check refused it. The
+        # completion record says so as an OUTCOME, with the leg as summary.
+        from tools import documents
+        original = documents.delete_document
+        documents.delete_document = lambda i, s, **k: documents.DocumentResult(
+            False, reason=documents.REFUSED_AT_EXECUTION, detail="role_does_not_permit")
+        self.addCleanup(setattr, documents, "delete_document", original)
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(tmp)
+            self.capture_decide()
+            status, body = gate_mod.handle_gate(cfg, {"tool": "delete_document", "args": {"id": "d1"},
+                                                      "session": {"id": "s-1"}, "provenance": {"derived_from": ["user"]}})
+            self.assertEqual(body["route"], "deny")
+            self.assertEqual(body["text"], gate_mod.DENIED_TEXT, "the agent learns nothing more")
+            post = read_lines(cfg.audit.path)[1]
+            self.assertEqual((post["outcome"], post["summary"]),
+                             ("refused_at_execution", "role_does_not_permit"))
+
+    def test_no_authority_means_deny_enrichment_failed_and_nothing_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(tmp, authority=authority_answering(err="no such session 's-9'"))
+            calls = self.stub_execute()
+            status, body = gate_mod.handle_gate(cfg, {
+                "tool": "delete_document", "args": {"id": "d1"},
+                "session": {"id": "s-9", "org": "acme", "acting_for": "u-1"},
+                "provenance": {"derived_from": ["user"]}})
+            self.assertEqual((status, body["route"]), (200, "deny"))
+            self.assertEqual(calls, [])
+            rec = read_lines(cfg.audit.path)[0]
+            self.assertEqual(rec["reasons"], ["enrichment_failed"])
+            # Attribution only from facts the gate established: the id the
+            # call named, and NOT the org the payload claimed.
+            self.assertEqual((rec["session"], rec["org"], rec["acting_for"]), ("s-9", "", ""))
+
+    def test_a_payload_without_a_session_id_is_denied_without_asking(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lookup = authority_answering()
+            cfg = make_config(tmp, authority=lookup)
+            status, body = gate_mod.handle_gate(cfg, {
+                "tool": "read_document", "args": {"id": "d1"}, "session": {},
+                "provenance": {"derived_from": ["user"]}})
+            self.assertEqual(body["route"], "deny")
+            self.assertEqual(read_lines(cfg.audit.path)[0]["reasons"], ["enrichment_failed"])
+            self.assertEqual(lookup.calls, [], "no session id, so nothing to ask")
+
+    def test_the_write_tools_execute_through_the_session(self):
+        # execute() routes each document tool to its client with the ROW's
+        # session id; set_member_role has no route at all (D6).
+        from tools import documents
+        seen = []
+        originals = {n: getattr(documents, n) for n in ("read_document", "update_document", "delete_document")}
+        documents.update_document = lambda i, b, s, **k: seen.append(("update", i, b, s)) or documents.DocumentResult(True, document_id=i)
+        documents.delete_document = lambda i, s, **k: seen.append(("delete", i, s)) or documents.DocumentResult(True, document_id=i)
+        documents.read_document = lambda i, s, **k: seen.append(("read", i, s)) or documents.DocumentResult(True, document_id=i, title="t", body="b")
+        for n, f in originals.items():
+            self.addCleanup(setattr, documents, n, f)
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(tmp)
+            sess = PASSING_AUTHORITY["session"]
+            self.assertEqual(gate_mod.execute(cfg, "update_document", {"id": "d1", "body": "x"}, sess)[0], "ok")
+            self.assertEqual(gate_mod.execute(cfg, "delete_document", {"id": "d1"}, sess)[0], "ok")
+            self.assertEqual(gate_mod.execute(cfg, "read_document", {"id": "d1"}, sess)[0], "ok")
+            outcome, _, summary = gate_mod.execute(cfg, "set_member_role", {"user": "u", "role": "admin"}, sess)
+            self.assertEqual((outcome, summary), ("error", "unroutable"))
+        self.assertEqual(seen, [("update", "d1", "x", "s-1"), ("delete", "d1", "s-1"), ("read", "d1", "s-1")])
+
+    def test_an_update_with_no_body_is_refused_before_the_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(tmp)
+            outcome, _, summary = gate_mod.execute(cfg, "update_document", {"id": "d1"}, PASSING_AUTHORITY["session"])
+            self.assertEqual(outcome, "error")
+            self.assertIn("body", summary)
 
 
 class Redaction(unittest.TestCase):

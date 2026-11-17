@@ -74,11 +74,13 @@ func bearerClaims(r *http.Request, secret []byte, hardened bool) (auth.Claims, b
 	return claims, true
 }
 
-// requireServiceSecret guards the D5b internal tool routes. The gateway
-// presents TOOLS_SECRET; the agent holds nothing that satisfies this,
-// which IS the mediation for read_document -- enforced at the auth layer
-// rather than by the network, since M2-N1 concedes the agent can reach
-// this route on the shared bridge network.
+// requireServiceSecret guards the internal routes (D5b; M3 T6). The
+// gateway presents TOOLS_SECRET; the agent holds nothing that satisfies
+// this, which is what keeps the agent off these routes -- enforced at the
+// auth layer rather than by the network, since M2-N1 concedes the agent
+// can reach them on the shared bridge network. Since M3 it is not the whole
+// mediation: each route also re-derives the session's authority
+// (internal_tools.go).
 //
 // The comparison is constant-time. A timing oracle on a shared secret is
 // a real finding in its own right and not one this lab is teaching, so
@@ -87,9 +89,9 @@ func bearerClaims(r *http.Request, secret []byte, hardened bool) (auth.Claims, b
 // Note what this handler does NOT do: parse a JWT, read claims, or
 // identify a user. A service credential authenticates a COMPONENT, and
 // conflating it with user identity is how an internal route ends up
-// trusting a caller-supplied org. The org arrives as an explicit query
-// parameter from the gateway's session record, and the handler binds it
-// through store.ForOrg.
+// trusting a caller-supplied org. No caller supplies one here: each route
+// takes a session id, resolves the org from the session row and binds it
+// through store.ForOrg (plan M3 T6 D4).
 func requireServiceSecret(toolsSecret []byte, next protectedHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// An empty configured secret must match NOTHING -- not even an
@@ -173,7 +175,7 @@ func (s sealedMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // /healthz and /auth/token are listed here too, with their existing
 // auth: none, so this one path owns every route and no route can be
 // added without declaring how it is guarded.
-func registerHardened(h *docHandlers, m *memberHandlers, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
+func registerHardened(h *docHandlers, m *memberHandlers, it *internalTools, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
 	mux := http.NewServeMux()
 	routes := []route{
 		{http.MethodGet, "/healthz", authNone, noClaims(healthzHandler(true))},
@@ -202,7 +204,17 @@ func registerHardened(h *docHandlers, m *memberHandlers, admin *store.AdminStore
 		// Hardened mode only. Vulnerable mode runs read_document
 		// in-process (T4 D2), so it needs no internal route, and
 		// registering one there would plant a leaf §2 never assigned.
-		{http.MethodGet, "/internal/tools/read_document", authService, h.internalReadDocument},
+		{http.MethodGet, "/internal/tools/read_document", authService, it.readDocument},
+
+		// M3 T6 (plan D2/D4): the authority route the gateway asks before
+		// it decides, and the two write tools' execution routes. Each
+		// execution route re-checks authority from the session row
+		// (internal_tools.go). Hardened only, for the same reason as
+		// read_document's. There is no route for set_member_role, by
+		// design (m3-delegation.md D6).
+		{http.MethodGet, "/internal/sessions/{session_id}/authority", authService, it.authority},
+		{http.MethodPost, "/internal/tools/update_document", authService, it.updateDocument},
+		{http.MethodPost, "/internal/tools/delete_document", authService, it.deleteDocument},
 	}
 	for _, rt := range routes {
 		pattern := rt.method + " " + rt.pattern

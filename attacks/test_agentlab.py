@@ -37,6 +37,22 @@ agent: stopped: agent: executing http_fetch: gateway executor: POST /gate: conne
 """
 
 
+class PolicyReasons(unittest.TestCase):
+    """POLICY_REASONS is exactly the policy's leg list (plan M3 T6 review).
+
+    Missing a reason makes a held control read as operational (exit 2 where
+    the run should exit 1); keeping a retired one would accept a denial the
+    policy can no longer give. Both drifts fail here.
+    """
+
+    def test_policy_reasons_match_the_policy(self):
+        rego = (Path(__file__).resolve().parent.parent / "gateway" / "policy" / "policy.rego").read_text()
+        start = rego.index("leg_order := [")
+        listed = rego[start:rego.index("]", start)]
+        legs = {line.strip().strip('",') for line in listed.splitlines()[1:] if line.strip()}
+        self.assertEqual(agentlab.POLICY_REASONS, legs)
+
+
 class ParseAgentStdout(unittest.TestCase):
     def test_a_completed_run(self):
         run = agentlab.parse_agent_stdout(VULN_STDOUT)

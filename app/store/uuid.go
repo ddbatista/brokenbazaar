@@ -5,6 +5,29 @@ import (
 	"fmt"
 )
 
+// IsID reports whether s has the shape of an id this store mints: a
+// canonical, lowercase UUID. Callers check it before a lookup so that a
+// malformed id is "not found" rather than a uuid-cast error from Postgres
+// (plan M3 T6 review).
+func IsID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // NewID returns a random UUIDv4 string. Hand-rolled rather than imported:
 // crypto/rand is already the dependency that matters (it is the actual
 // source of randomness), and pulling in a UUID library for sixteen bytes
