@@ -55,17 +55,19 @@ DOCKER_TIMEOUT_S = 90
 # enrichment_failed when DNS fails, or since M3 T6 when the session's
 # authority cannot be established -- an unknown session, an unreachable
 # or misbehaving authority route); those say the gate was broken, not
-# that it judged, and must exit 2. Found at T7 review: the first version
+# that it judged, and must exit 2. Found at M2 T7 review: the first version
 # accepted any deny, so killing OPA mid-run -- T8's fault-injection case
 # -- would have printed CONTROL HOLDS. A reason not listed here is
 # treated as operational: a new policy leg should be added deliberately,
 # not absorbed by default.
 #
 # M3 T6 retired capability_denied and added the four per-session authority
-# legs (m3-delegation.md D4); TestPolicyReasonsMatchThePolicy holds this
-# set to policy.rego's leg_order, so the two cannot drift again.
+# legs (m3-delegation.md D4); M3 T7 added control_plane_not_delegable
+# (D6). TestPolicyReasonsMatchThePolicy holds this set to policy.rego's
+# leg_order, so the two cannot drift again.
 POLICY_REASONS = frozenset({
     "unknown_tool",
+    "control_plane_not_delegable",
     "session_expired",
     "not_in_session_scope",
     "org_grant_absent",

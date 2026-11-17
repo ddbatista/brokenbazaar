@@ -1,5 +1,6 @@
 # BrokenBazaar gateway policy (M2, T5 decision D5.3; M3 T6 -- the
-# per-session authority legs, m3-delegation.md D4/D9).
+# per-session authority legs, m3-delegation.md D4/D9; M3 T7 -- the
+# non-delegable denylist, D6).
 #
 # HARDENED ZONE. The agent drafts; a human applies and commits. The test
 # AGENTS.md gives for zone membership -- "if a change here were
@@ -9,15 +10,17 @@
 #
 # EVALUATION ORDER IS THE DESIGN, not a detail (D6, D5.3; M3 T6 D5):
 #
-#     tool known -> time -> session scope -> org grant -> role
-#                -> allowlist -> range -> provenance -> default deny
+#     tool known -> delegable -> time -> session scope -> org grant
+#                -> role -> allowlist -> range -> provenance -> default deny
 #
 # The authority legs come before the egress legs, and each finding still
 # gets its own reason, because each PoC's session requests the scope its
 # flow needs (m3-delegation.md D7): 03 and 04 pass every authority leg and
 # die at the allowlist and the range, as in M2; 05 dies at the role; the 03
-# least-privilege variant dies at the scope. T7's non-delegable denylist
-# slots in right after the tool check.
+# least-privilege variant dies at the scope; finding 06 dies at
+# delegability, which comes before every session leg so that no session
+# fact -- expired, out of scope -- can hide an attempt at a control-plane
+# action behind a more ordinary reason.
 #
 # Only the FIRST failing leg is reported. That is load-bearing, and the
 # reason is specific rather than aesthetic: both M2 fixtures sit in
@@ -101,23 +104,53 @@ violations contains "unknown_tool" if {
 	not tool in data.tools
 }
 
+# Leg 2 -- delegability (m3-delegation.md D6; SR-B3-7, SR-B8-2): AUTHORITY
+# IS DELEGABLE; THE AUTHORITY TO CHANGE THE DELEGATION IS NOT.
+#
+# A tool on this list is denied to every agent session, whatever the
+# session's scope, the org's grants or the requester's role. The role leg
+# would ALLOW set_member_role for an admin, correctly -- the admin may do
+# it directly (PATCH /orgs/{org}/members/{user}) -- so the ceiling alone
+# cannot stop an admin's agent being steered into it by a document
+# (finding 06). That needs this leg. Not forbidden; not delegable.
+#
+# SR-B8-2 asks for an EXPLICIT entry, "not by the accident of nothing
+# being implemented yet": until M3 T7 set_member_role died at unknown_tool,
+# which is a denial nobody decided. It is in data.tools now, so it reaches
+# this leg and is refused by name.
+#
+# A CONSTANT HERE, NOT POLICY DATA (M3 T7 D1). data.json is deploy-time
+# configuration that varies by deployment (grants, the allowlist); this is
+# an invariant. A swapped or trimmed data file must not be able to empty
+# it, and a constant cannot be missing, so there is no undefined to fail
+# open on. M4b extends this set (SR-B9-10: installing a skill).
+#
+# Enforced twice: here by policy, and by STRUCTURE -- no internal execution
+# route exists for any tool on this list, so an allow could not execute it
+# (the API's TestNonDelegableToolsHaveNoInternalRoute reads this set).
+non_delegable := {"set_member_role"}
+
+violations contains "control_plane_not_delegable" if {
+	tool in non_delegable
+}
+
 # M2's second leg, capability_denied against a static data.capabilities
 # list, is RETIRED here (M3 T6 D5). It was the seam M2 left for exactly
 # this redesign -- "the lookup is real, the table is static" -- and the four
 # legs below replace it with authority re-derived per session and per call.
 
-# Leg 2 -- time. sessions.expires_at against now, computed by the API.
+# Leg 3 -- time. sessions.expires_at against now, computed by the API.
 violations contains "session_expired" if {
 	not passes("within_time")
 }
 
-# Leg 3 -- session scope: the tools the session asked for at creation
+# Leg 4 -- session scope: the tools the session asked for at creation
 # (SR-B3-5). Consent, not authority (M3-N5): it can only narrow.
 violations contains "not_in_session_scope" if {
 	not passes("in_scope")
 }
 
-# Leg 4 -- the org's grants, in policy data (m3-delegation.md D9): deploy-
+# Leg 5 -- the org's grants, in policy data (m3-delegation.md D9): deploy-
 # time, read-only at runtime (SR-B8-3), reviewed as a diff in this zone.
 # Keyed by the org the SESSION ROW names. An org the data does not list is
 # granted nothing -- there is no default grant, because a default is a
@@ -135,7 +168,7 @@ default org_grants := {}
 
 org_grants := data.org_grants
 
-# Leg 5 -- the requester's role NOW, against the one permission table.
+# Leg 6 -- the requester's role NOW, against the one permission table.
 # Computed in Go by the same function the direct routes call (D4: role
 # semantics written a second time, here, would drift). This is the ceiling
 # (SR-B3-8): the agent may do only what its user could do directly.
@@ -143,7 +176,7 @@ violations contains "role_does_not_permit" if {
 	not passes("role_permits")
 }
 
-# Leg 6 -- egress allowlist, on the RESOLVED host.
+# Leg 7 -- egress allowlist, on the RESOLVED host.
 #
 # metadata.google.internal is deliberately ON this list. It models the
 # operator mistake that makes the range leg earn its keep, and finding 04
@@ -155,7 +188,7 @@ violations contains "egress_not_allowlisted" if {
 	not object.get(resolved, "host", "") in data.egress_allowlist
 }
 
-# Leg 7 -- the resolved address.
+# Leg 8 -- the resolved address.
 #
 # SR-B7-1: by range, never by string match. The classification is
 # computed by the gateway with ipaddress parsing (the same tested
@@ -167,7 +200,7 @@ violations contains "resolved_address_denied" if {
 	object.get(resolved, "denied_range", true) == true
 }
 
-# Leg 8 -- provenance.
+# Leg 9 -- provenance.
 #
 # SR-B7-2 / SR-B4-12 / SR-B5-4: an outbound request carrying
 # tenant-derived content is denied EVEN WHEN THE DESTINATION IS
@@ -187,6 +220,7 @@ violations contains "tenant_data_egress" if {
 # ordered_violations[0] is the first one.
 leg_order := [
 	"unknown_tool",
+	"control_plane_not_delegable",
 	"session_expired",
 	"not_in_session_scope",
 	"org_grant_absent",

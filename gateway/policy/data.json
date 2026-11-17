@@ -3,7 +3,8 @@
     "read_document",
     "http_fetch",
     "update_document",
-    "delete_document"
+    "delete_document",
+    "set_member_role"
   ],
   "org_grants": {
     "0a000000-0000-4000-8000-000000000001": [
