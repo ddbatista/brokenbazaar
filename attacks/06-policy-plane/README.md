@@ -51,4 +51,4 @@ In vulnerable mode the agent runs `set_member_role` in-process (`NaiveExecutor`)
 ## What this exploit does NOT show (declared)
 
 - **A compromised agent process writing `memberships` directly** (R-M3-2). The agent's database credential can, and no gateway rule sees SQL. The fix is a database-role split, recorded as a follow-up.
-- **Detection.** Agent-initiated role changes and `control_plane_not_delegable` denials are T10's detection shapes.
+- **Detection** is measured separately, in `make detect` (`detections/README.md`, M3): R4 sees the `set_member_role` call in both modes, R5 the agent-made role change (vulnerable), R6 the `control_plane_not_delegable` refusal (hardened).
