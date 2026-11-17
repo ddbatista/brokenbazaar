@@ -144,6 +144,32 @@ class JudgeFault(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("opa_unavailable", why)
 
+    def test_the_authority_fault_names_the_gateways_own_words(self):
+        f3 = [f for f in faults.FAULTS if f.title.startswith("F3")]
+        self.assertEqual(len(f3), 1, "plan M3 T9 D3: the authority-route fault exists")
+        self.assertEqual(f3[0].cause, "'enrichment_failed': authority route unreachable")
+        ok, _ = faults.judge(2, "OPERATIONAL ERROR: the gateway failed closed on read_document "
+                                "(d_x: 'enrichment_failed': authority route unreachable: refused)", f3[0].cause)
+        self.assertTrue(ok)
+
+
+class AgentExploitsAreDiscovered(unittest.TestCase):
+    """Plan M3 T9 D1: every finding that drives the agent runs under every
+    fault, found by what its exploit does -- a new one joins by existing."""
+
+    def test_the_agent_exploits_and_only_them(self):
+        names = [p.name for p in faults.agent_exploits()]
+        for name in ("03-indirect-injection", "04-ssrf-metadata", "05-confused-deputy", "06-policy-plane"):
+            self.assertIn(name, names)
+        for name in ("01-cross-tenant-read", "02-jwt-org-claim"):
+            self.assertNotIn(name, names, "an API-only exploit never meets the gate")
+
+    def test_driving_the_agent_is_read_from_the_source(self):
+        self.assertTrue(faults.drives_agent("run = lab.ask(hardened, org, ...)"))
+        self.assertTrue(faults.drives_agent("lab.resume(hardened, org, sid, msg)"))
+        self.assertTrue(faults.drives_agent("lab.run_agent(h, o, u, m, s)"))
+        self.assertFalse(faults.drives_agent("lab.login(base, email)  # ask() later"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
 
     python3 -m unittest discover -s attacks -t attacks -p 'test_*.py' -v
 
-stdlib only, no stack. Exploits 03 and 04 turn two texts into an exit
+stdlib only, no stack. Exploits 03 to 06 turn two texts into an exit
 code: the agent's stdout and the gateway's audit log. A misread in either
 is how a run "passes" without the thing it claims having happened -- so
 the parsers are pinned here, and every ambiguous input parses to
@@ -476,3 +476,64 @@ class JudgeVariants(unittest.TestCase):
     def test_no_variants_is_operational(self):
         with self.assertRaises(agentlab.Operational):
             self.judge()
+
+
+# --- plan M3 T9 -----------------------------------------------------------------
+
+class GateCheckedAtControls(unittest.TestCase):
+    """Plan M3 T9 D2: a broken gate is named by the first CONTROL that meets it.
+
+    05 and 06 begin with controls; under a fault their first refused call
+    is a control, which would raise "control did not behave" and never say
+    the gate was broken. So a control check reads its session's gateway
+    records first and names any fail-closed deny, with the gateway's own
+    detail. Attack runs are NOT checked there: their verdict reads the
+    attacker's side first, so evidence is exit 0 in any mode (T9 review).
+    """
+
+    def setUp(self):
+        self.saved = agentlab.run_agent, agentlab._run, agentlab.gateway_log
+        self.addCleanup(self.restore)
+        self.reads = []
+        self.run = agentlab.AgentRun(session_id="s-1", tools=["read_document"], answer="Summary: x")
+        agentlab.run_agent = lambda *a, **k: self.run
+        agentlab._run = lambda *a, **k: self.run
+        self.log = ""
+
+        def log(hardened):
+            self.reads.append(hardened)
+            return self.log
+        agentlab.gateway_log = log
+
+    def restore(self):
+        agentlab.run_agent, agentlab._run, agentlab.gateway_log = self.saved
+
+    FAILED = json.dumps({"phase": "pre", "decision_id": "d_f", "session": "s-1", "tool": "read_document",
+                         "route": "deny", "reasons": ["enrichment_failed"],
+                         "detail": "authority route unreachable: [Errno 111] Connection refused"})
+
+    def test_a_control_names_a_fail_closed_gate_with_its_detail(self):
+        self.log = self.FAILED
+        with self.assertRaises(agentlab.Operational) as ctx:
+            agentlab.expect_read_then_answer(self.run, "control did not behave", hardened=True)
+        self.assertIn("'enrichment_failed': authority route unreachable", str(ctx.exception))
+        self.assertNotIn("control did not behave", str(ctx.exception))
+
+    def test_policy_decisions_pass_through_a_control(self):
+        self.log = json.dumps({"phase": "pre", "decision_id": "d_p", "session": "s-1", "tool": "read_document",
+                               "route": "allow", "reasons": ["policy_satisfied"]})
+        agentlab.expect_read_then_answer(self.run, "why", hardened=True)
+
+    def test_attack_runs_do_not_read_the_defenders_record(self):
+        # Evidence first: ask() and resume() return the run untouched, even
+        # if the gate failed closed somewhere in the session. The exploit
+        # judges the attacker's side before it reads gateway.jsonl.
+        self.log = self.FAILED
+        agentlab.ask(True, "o", "u", "hi", "who", ("read_document",))
+        agentlab.resume(True, "o", "s-1", "hi")
+        self.assertEqual(self.reads, [])
+
+    def test_a_vulnerable_control_has_no_gate_to_read(self):
+        self.log = self.FAILED
+        agentlab.expect_read_then_answer(self.run, "why", hardened=False)
+        self.assertEqual(self.reads, [])
