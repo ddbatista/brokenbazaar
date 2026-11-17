@@ -260,7 +260,10 @@ def execute(cfg: Config, tool: str, args: dict, session: dict):
 
     There is no branch for set_member_role, and there must never be one:
     it falls through to "unroutable", because no internal route exists to
-    execute a control-plane action (m3-delegation.md D6).
+    execute a control-plane action (m3-delegation.md D6). The policy denies
+    it first, as control_plane_not_delegable; this is the second refusal,
+    the one that would still hold if the first were wrong
+    (test_an_allowed_set_member_role_still_cannot_execute).
     """
     api = {"api_base": cfg.api_base, "tools_secret": cfg.tools_secret}
     session_id = session.get("id", "")
@@ -352,6 +355,13 @@ def handle_gate(cfg: Config, payload: dict) -> tuple[int, dict]:
             enrich_err = "the authority lookup returned no answer"
     # An unnamed tool is not asked about: the policy refuses it as
     # unknown_tool, M2's reason, with every authority leg reading as failed.
+    #
+    # A failed lookup is enrichment_failed BEFORE the policy runs, so it
+    # masks every policy reason -- control_plane_not_delegable included: a
+    # set_member_role call naming an unknown session is recorded as
+    # enrichment_failed. Fail closed either way, and the pre-record still
+    # names the tool, so the attempt stays visible (plan M3 T7 D3). The
+    # gateway keeps no copy of the denylist to short-circuit on.
     session = authority["session"] if authority else {"id": session_id, "org": "", "acting_for": ""}
     authority_facts = ({"role_now": authority["role_now"], "legs": authority["legs"]}
                        if authority else {})

@@ -84,8 +84,9 @@ class R2EgressOffAllowlist(unittest.TestCase):
         self.assertEqual(r.find_agent_alerts(recs, ALLOW), [])
 
     def test_host_matching_is_by_parsed_host_not_substring(self):
-        # The policy matches the host exactly (policy.rego, leg 2). A
-        # substring test would admit docs.example.attacker.example.
+        # The policy matches the host exactly (policy.rego's
+        # egress_not_allowlisted leg). A substring test would admit
+        # docs.example.attacker.example.
         for url in ("http://DOCS.EXAMPLE/x", "http://docs.example:8080/x"):
             with self.subTest(url=url):
                 recs = [pre("a_1", "s1", "http_fetch", {"url": url})]

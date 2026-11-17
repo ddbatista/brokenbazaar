@@ -26,7 +26,9 @@ import (
 //
 // Two legs are not here, on purpose. The org grant is platform policy and
 // lives in policy data, evaluated by OPA (D9). Delegability is a rule about
-// delegation, not about roles, and lives at the gateway (D6, T7).
+// delegation, not about roles: the gateway policy's non_delegable set (D6).
+// This package keeps no copy of that list -- two copies drift -- and the
+// API's side of it is structural: no internal route for a listed tool.
 type Legs struct {
 	WithinTime  bool `json:"within_time"`
 	InScope     bool `json:"in_scope"`

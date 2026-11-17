@@ -268,6 +268,23 @@ class PolicyDecisions(unittest.TestCase):
             {"host": "docs.example", "ip": "93.184.216.34", "denied_range": False})
         self.assertEqual(d.route, "allow")
 
+    def test_finding_06_dies_at_delegability(self):
+        # Plan M3 T7: an ADMIN's session, every authority leg passing --
+        # the role leg allows set_member_role, because an admin may change
+        # roles directly. The denial is the non-delegable denylist's alone.
+        d = decide_mod.decide(
+            {
+                "tool": "set_member_role",
+                "args": {"user": "u-2", "role": "admin"},
+                "session": PASSING_AUTHORITY["session"],
+                "provenance": {"derived_from": ["user", "untrusted"]},
+                "resolved": {},
+                "authority": {"role_now": "admin", "legs": PASSING_AUTHORITY["legs"]},
+            },
+            policy_dir=str(POLICY_DIR), opa_path=OPA)
+        self.assertEqual(d.route, "deny")
+        self.assertEqual(d.reasons, ["control_plane_not_delegable"])
+
     def test_empty_input_is_denied(self):
         # The regression for the fail-open the first draft shipped: an
         # undefined input.tool made every leg undefined, violations
@@ -601,6 +618,45 @@ class AuthorityWiring(unittest.TestCase):
             outcome, _, summary = gate_mod.execute(cfg, "set_member_role", {"user": "u", "role": "admin"}, sess)
             self.assertEqual((outcome, summary), ("error", "unroutable"))
         self.assertEqual(seen, [("update", "d1", "x", "s-1"), ("delete", "d1", "s-1"), ("read", "d1", "s-1")])
+
+    def test_an_allowed_set_member_role_still_cannot_execute(self):
+        # Plan M3 T7, the STRUCTURAL half of D6: suppose the policy were
+        # wrong and allowed it. The gate still has no route to execute a
+        # control-plane action -- no client is called, nothing reaches the
+        # API -- and the post-record says so. Policy denies it; structure
+        # makes the denial not the only thing standing in the way.
+        import importlib
+        import pkgutil
+        import re
+        import tools
+        from tools import documents
+        # No client for any non-delegable tool, in ANY tools module -- the
+        # list read from the policy itself, so M4b's additions are covered
+        # without an edit here (and no second copy of the list exists).
+        rego = (POLICY_DIR / "policy.rego").read_text()
+        denylist = re.findall(r'"([^"]+)"', re.search(r"(?m)^non_delegable := \{([^}]*)\}", rego).group(1))
+        self.assertIn("set_member_role", denylist)
+        for info in pkgutil.iter_modules(tools.__path__):
+            if info.name.startswith("test_"):
+                continue
+            module = importlib.import_module(f"tools.{info.name}")
+            for tool in denylist:
+                self.assertFalse(hasattr(module, tool), f"tools.{info.name} has a client for {tool}, a control-plane tool")
+        reached = []
+        original = documents.call_internal
+        documents.call_internal = lambda *a, **k: reached.append(a) or (200, "{}")
+        self.addCleanup(setattr, documents, "call_internal", original)
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(tmp)
+            self.capture_decide()
+            status, body = gate_mod.handle_gate(cfg, {
+                "tool": "set_member_role", "args": {"user": "u-2", "role": "admin"},
+                "session": {"id": "s-1"}, "provenance": {"derived_from": ["user"]}})
+            self.assertNotEqual(body.get("route"), "allow")
+            pre, post = read_lines(cfg.audit.path)
+            self.assertEqual(pre["route"], "allow", "the test's premise: the policy was bypassed")
+            self.assertEqual((post["outcome"], post["summary"]), ("error", "unroutable"))
+        self.assertEqual(reached, [], "nothing may reach the API for a control-plane tool")
 
     def test_an_update_with_no_body_is_refused_before_the_api(self):
         with tempfile.TemporaryDirectory() as tmp:

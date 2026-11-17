@@ -135,12 +135,13 @@ func TestToolActions(t *testing.T) {
 // set_member_role passes the ROLE leg for an admin. That is correct and
 // load-bearing: the role leg is the ceiling (05), not delegability (06).
 // If this ever failed, 06's hardened denial would come from the wrong
-// control, and T7's denylist would be untested.
+// control, and the gateway policy's non_delegable leg
+// (control_plane_not_delegable, M3 T7) would be untested.
 func TestAdminPassesTheRoleLegForSetMemberRole(t *testing.T) {
 	s := passing()
 	s.Scope = []string{"set_member_role"}
 	if !Derive(s, "set_member_role", now).RolePermits {
-		t.Fatal("an admin's role permits set_member_role; delegability is a separate leg (T7)")
+		t.Fatal("an admin's role permits set_member_role; delegability is the policy's control_plane_not_delegable leg")
 	}
 }
 

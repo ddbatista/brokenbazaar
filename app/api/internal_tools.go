@@ -38,7 +38,9 @@ import (
 //
 // There is no route for set_member_role, and there must never be one: a
 // control-plane action is unreachable from the agent by structure, as well
-// as refused by policy (D6, T7).
+// as refused by policy as control_plane_not_delegable (D6). Both halves are
+// pinned: TestNonDelegableToolsHaveNoInternalRoute reads the policy's
+// denylist and probes every listed tool's route.
 
 // sessionAuthorityLookup is AdminStore.SessionAuthority in production.
 type sessionAuthorityLookup interface {
