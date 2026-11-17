@@ -1,12 +1,27 @@
 {
   "tools": [
     "read_document",
-    "http_fetch"
+    "http_fetch",
+    "update_document",
+    "delete_document"
   ],
-  "capabilities": [
-    "read_document",
-    "http_fetch"
-  ],
+  "org_grants": {
+    "0a000000-0000-4000-8000-000000000001": [
+      "read_document",
+      "http_fetch",
+      "update_document",
+      "delete_document"
+    ],
+    "0a000000-0000-4000-8000-000000000002": [
+      "read_document",
+      "http_fetch",
+      "update_document",
+      "delete_document"
+    ],
+    "0a000000-0000-4000-8000-000000000003": [
+      "read_document"
+    ]
+  },
   "egress_allowlist": [
     "docs.example",
     "metadata.google.internal"

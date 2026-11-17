@@ -1,4 +1,5 @@
-# BrokenBazaar gateway policy (M2, T5 decision D5.3).
+# BrokenBazaar gateway policy (M2, T5 decision D5.3; M3 T6 -- the
+# per-session authority legs, m3-delegation.md D4/D9).
 #
 # HARDENED ZONE. The agent drafts; a human applies and commits. The test
 # AGENTS.md gives for zone membership -- "if a change here were
@@ -6,9 +7,17 @@
 # answers yes here twice over: this file decides what is allowed, and it
 # decides what the audit record will say happened.
 #
-# EVALUATION ORDER IS THE DESIGN, not a detail (D6, D5.3):
+# EVALUATION ORDER IS THE DESIGN, not a detail (D6, D5.3; M3 T6 D5):
 #
-#     capability -> allowlist -> range -> provenance -> default deny
+#     tool known -> time -> session scope -> org grant -> role
+#                -> allowlist -> range -> provenance -> default deny
+#
+# The authority legs come before the egress legs, and each finding still
+# gets its own reason, because each PoC's session requests the scope its
+# flow needs (m3-delegation.md D7): 03 and 04 pass every authority leg and
+# die at the allowlist and the range, as in M2; 05 dies at the role; the 03
+# least-privilege variant dies at the scope. T7's non-delegable denylist
+# slots in right after the tool check.
 #
 # Only the FIRST failing leg is reported. That is load-bearing, and the
 # reason is specific rather than aesthetic: both M2 fixtures sit in
@@ -71,24 +80,70 @@ tool := object.get(input, "tool", "")
 
 resolved := object.get(input, "resolved", {})
 
+# M3 T6: the session's authority NOW, established by the gateway from the
+# API's authority route (gateway/authority.py), never from the agent's
+# payload. Each leg is a boolean that means PASSES, and a leg that is
+# missing reads as FAILING -- the same fail-closed direction as
+# denied_range above. A leg named for failure ("expired") would invert
+# that, and a missing field would pass (m3-delegation.md D4).
+legs := object.get(input, ["authority", "legs"], {})
+
+passes(leg) if object.get(legs, leg, false) == true
+
+# The org the session row names. "" when the gateway could not establish
+# it, which no grant lists.
+org := object.get(input, ["session", "org"], "")
+
 derived_from := object.get(input, ["provenance", "derived_from"], [])
 
-# Leg 1 -- capability. D7 made concrete: the lookup is real, the table is
-# static, and in M2 it contains every tool, because a session is created
-# with every grant in scope. That is violated-by-design, named as such in
-# the threat model, and M3 swaps the DATA without touching this
-# mechanism. A leg that exists and passes is not theatre: it is the seam
-# the redesign lands in, and it is tested.
+# Leg 1 -- the tool exists at all.
 violations contains "unknown_tool" if {
 	not tool in data.tools
 }
 
-violations contains "capability_denied" if {
-	tool in data.tools
-	not tool in data.capabilities
+# M2's second leg, capability_denied against a static data.capabilities
+# list, is RETIRED here (M3 T6 D5). It was the seam M2 left for exactly
+# this redesign -- "the lookup is real, the table is static" -- and the four
+# legs below replace it with authority re-derived per session and per call.
+
+# Leg 2 -- time. sessions.expires_at against now, computed by the API.
+violations contains "session_expired" if {
+	not passes("within_time")
 }
 
-# Leg 2 -- egress allowlist, on the RESOLVED host.
+# Leg 3 -- session scope: the tools the session asked for at creation
+# (SR-B3-5). Consent, not authority (M3-N5): it can only narrow.
+violations contains "not_in_session_scope" if {
+	not passes("in_scope")
+}
+
+# Leg 4 -- the org's grants, in policy data (m3-delegation.md D9): deploy-
+# time, read-only at runtime (SR-B8-3), reviewed as a diff in this zone.
+# Keyed by the org the SESSION ROW names. An org the data does not list is
+# granted nothing -- there is no default grant, because a default is a
+# fail-open.
+violations contains "org_grant_absent" if {
+	not tool in object.get(org_grants, org, [])
+}
+
+# Total, like the lookups at the top: policy data with no org_grants at all
+# grants nothing, rather than leaving the leg undefined (and so silent).
+# A defaulted rule, not object.get(data, ...): reading the whole data tree
+# from a rule makes the policy depend on every package under data,
+# including its own tests -- a recursion OPA refuses to compile.
+default org_grants := {}
+
+org_grants := data.org_grants
+
+# Leg 5 -- the requester's role NOW, against the one permission table.
+# Computed in Go by the same function the direct routes call (D4: role
+# semantics written a second time, here, would drift). This is the ceiling
+# (SR-B3-8): the agent may do only what its user could do directly.
+violations contains "role_does_not_permit" if {
+	not passes("role_permits")
+}
+
+# Leg 6 -- egress allowlist, on the RESOLVED host.
 #
 # metadata.google.internal is deliberately ON this list. It models the
 # operator mistake that makes the range leg earn its keep, and finding 04
@@ -100,7 +155,7 @@ violations contains "egress_not_allowlisted" if {
 	not object.get(resolved, "host", "") in data.egress_allowlist
 }
 
-# Leg 3 -- the resolved address.
+# Leg 7 -- the resolved address.
 #
 # SR-B7-1: by range, never by string match. The classification is
 # computed by the gateway with ipaddress parsing (the same tested
@@ -112,7 +167,7 @@ violations contains "resolved_address_denied" if {
 	object.get(resolved, "denied_range", true) == true
 }
 
-# Leg 4 -- provenance.
+# Leg 8 -- provenance.
 #
 # SR-B7-2 / SR-B4-12 / SR-B5-4: an outbound request carrying
 # tenant-derived content is denied EVEN WHEN THE DESTINATION IS
@@ -132,7 +187,10 @@ violations contains "tenant_data_egress" if {
 # ordered_violations[0] is the first one.
 leg_order := [
 	"unknown_tool",
-	"capability_denied",
+	"session_expired",
+	"not_in_session_scope",
+	"org_grant_absent",
+	"role_does_not_permit",
 	"egress_not_allowlisted",
 	"resolved_address_denied",
 	"tenant_data_egress",
