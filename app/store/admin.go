@@ -34,7 +34,16 @@ func NewAdminStore(pool *pgxpool.Pool) *AdminStore {
 }
 
 func (s *AdminStore) CreateOrg(ctx context.Context, name string) (Org, error) {
-	org := Org{ID: NewID(), Name: name}
+	return s.CreateOrgWithID(ctx, NewID(), name)
+}
+
+// CreateOrgWithID creates an org whose id the caller fixes. The seed is the
+// one caller (plan M3 T6 D6): org grants live in deploy-time policy data
+// (m3-delegation.md D9), keyed by org id, so the seeded orgs need ids that
+// exist before the database does. A product with an org-creation flow would
+// generate ids and write grants through a control plane (SR-B8-8, M4a).
+func (s *AdminStore) CreateOrgWithID(ctx context.Context, id, name string) (Org, error) {
+	org := Org{ID: id, Name: name}
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO orgs (id, name) VALUES ($1::uuid, $2) RETURNING created_at`,
 		org.ID, org.Name,

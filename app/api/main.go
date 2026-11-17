@@ -171,6 +171,7 @@ func main() {
 
 	handlers := &docHandlers{admin: admin, pool: pool, hardened: hardened}
 	members := newMemberHandlers(admin, pool)
+	internal := newInternalTools(admin, pool)
 	// SR-B1-1 (deny-by-default route registration) lands here in T5, now that
 	// the token-protected document routes (D4) exist and there is something to
 	// protect. The two modes register differently on purpose: hardened mode
@@ -186,7 +187,7 @@ func main() {
 	// entirely. There is no longer a mux in scope here to register onto.
 	var handler http.Handler
 	if hardened {
-		handler = registerHardened(handlers, members, admin, jwtSecret, loadToolsSecret(true))
+		handler = registerHardened(handlers, members, internal, admin, jwtSecret, loadToolsSecret(true))
 	} else {
 		// Vulnerable mode keeps the bare mux on purpose: no table, no
 		// auth declaration, no panic-on-missing. That contrast is the

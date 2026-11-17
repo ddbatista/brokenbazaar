@@ -237,9 +237,9 @@ func unmediated(tool, note string) Result {
 // the rule above it -- authority is delegable, the authority to change the
 // delegation is not (SR-B3-7, SR-B8-2, D6). Hardened mode refuses it by
 // structure today -- no internal execution route for it exists, so even an
-// allow could not execute it, and the gateway's capability leg denies the
-// unlisted tool as unknown_tool. T7 adds the second, explicit refusal the
-// threat model requires: a denylist entry, control_plane_not_delegable.
+// allow could not execute it -- and the policy denies it as unknown_tool,
+// because data.tools does not list it. T7 adds the second, explicit refusal
+// the threat model requires: a denylist entry, control_plane_not_delegable.
 //
 // What this path does get right, deliberately, is the record. The change
 // goes through the same org-bound store method as the direct route, in one

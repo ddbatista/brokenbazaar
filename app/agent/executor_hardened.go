@@ -28,7 +28,7 @@ import (
 //
 // The wire contract is D5.1, as amended by D5.3:
 //
-//	POST /gate  {"tool", "args", "session":{id,org,acting_for},
+//	POST /gate  {"tool", "args", "session":{id},
 //	             "provenance":{"derived_from":[...]}}
 //
 //	200 {"route":"allow","decision_id","reason","text","summary"}
@@ -94,8 +94,19 @@ func Mode() string { return "hardened" }
 type gateRequest struct {
 	Tool       string            `json:"tool"`
 	Args       map[string]string `json:"args"`
-	Session    SessionInfo       `json:"session"`
+	Session    gateSession       `json:"session"`
 	Provenance gateProvenance    `json:"provenance"`
+}
+
+// gateSession names the acting session and nothing else about it (plan M3
+// T6 D3; m3-delegation.md D3). Until M3 the payload also carried the org and
+// the acting user, and the gateway used them; they were the agent's
+// testimony about its own authority (M2-N3). The gateway now resolves both
+// from the session row through the API's authority route, and a field it
+// ignores is not sent: an ignored field is one a later edit could start
+// trusting.
+type gateSession struct {
+	ID string `json:"id"`
 }
 
 type gateProvenance struct {
@@ -121,7 +132,7 @@ func (e *GatewayExecutor) Execute(ctx context.Context, a Action, call CallContex
 	body, err := json.Marshal(gateRequest{
 		Tool:       a.Tool,
 		Args:       a.Args,
-		Session:    call.Session,
+		Session:    gateSession{ID: call.Session.ID},
 		Provenance: gateProvenance{DerivedFrom: call.DerivedFrom},
 	})
 	if err != nil {

@@ -10,6 +10,6 @@ dependency is a trust decision, and nothing here needs one.
 
 Layout:
     fetch.py      http_fetch -- the SR-B5-3 / SR-B7-1 implementation
-    documents.py  read_document -- the D5b internal-route client
+    documents.py  read/update/delete_document -- the internal-route clients (D5b, M3 T6)
     test_tools.py stdlib unittest for both
 """

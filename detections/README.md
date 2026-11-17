@@ -14,6 +14,12 @@ Since M3 T3 the API also logs a **second, different** denial, in both modes: a m
 
 Its org field is `org=`, not `target_org=`, **on purpose**. This rule reads `target_org=` as "an org this principal is probing from outside" and alerts on a sweep across orgs. A member refused inside their *own* org is a different signal: capability escalation, which M3 T10 owns. If the formats matched, this rule would count role denials as cross-tenant probes. So `DENY_RE` does not match the new line, and nothing alerts on it until T10.
 
+Since M3 T6 there is a **third**, hardened mode only: an internal execution route refusing a call the gateway had allowed, because the session's authority failed when the API re-checked it at execution (M3-N2: a demotion, an expiry or a removal landing between the gate's decision and the write):
+
+    2026/11/16 15:02:11 authz: deny session=<uuid> org=<uuid> decision=role-does-not-permit tool=delete_document at=execution
+
+It carries `session=`, not `sub=`: the caller is the gateway, acting for a session, not a user. `decision=` uses the same hyphenated spelling as the T3 line, so one reason has one spelling across the API's logs. The gateway records the same event in `gateway.jsonl` as a completion with `outcome: "refused_at_execution"` and the failing check as its summary. `DENY_RE` does not match this line either; T10 owns both.
+
 The rule (`rule.py`, pure function, unit-tested in `test_rule.py`): alert when one principal accumulates **≥ 5 denials**. Per-principal, deliberately not per (principal, org) pair — a per-pair threshold would let an attacker spread 4 probes across every org and stay silent forever. Alert carries its evidence: sub, count, distinct target orgs, a sample line.
 
 `make detect` replays the PoCs against the live stack in both modes and asserts the full detect/miss matrix (`replay.py`):
