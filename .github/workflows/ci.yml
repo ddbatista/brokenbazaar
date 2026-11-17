@@ -152,8 +152,10 @@ jobs:
 
         - name: fault injection -- a broken gate must never read as "control held"
           # Last, because it breaks the stack on purpose (and undoes it).
-          # OPA removed from the live gateway, then the gateway stopped;
-          # every exploit must exit 2 naming the fault (SR-B5-5, D5.5).
+          # OPA removed from the live gateway, then the gateway stopped,
+          # then the API's authority route made unreachable from the
+          # gateway (M3 T9, SR-B8-4); every agent exploit -- discovered,
+          # not listed -- must exit 2 naming the fault (SR-B5-5, D5.5).
           run: make faults
 
         - name: logs on failure
