@@ -90,7 +90,7 @@ test-gateway-image: ## Run the gateway suite INSIDE its image: the shipped OPA, 
 		[ $$status -eq 0 ] || exit $$status; \
 		if echo "$$out" | grep -q "skipped="; then echo "FAIL: tests were SKIPPED inside the gateway image -- OPA or the policy is missing"; exit 1; fi
 
-faults: ## Break the gate for real (OPA removed, gateway stopped); every exploit must exit 2  (M2, T8; hardened stack)
+faults: ## Break the gate for real (OPA removed, gateway stopped, authority route unreachable); every agent exploit must exit 2  (M2 T8, M3 T9; hardened stack)
 	python3 attacks/faults.py
 
 leakscan: ## MCP01: no platform secret or JWT in any audit store; secrets read from the running stack  (M2, T8)

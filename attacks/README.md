@@ -28,7 +28,7 @@ Every `exploit.py`:
 
 ## Amendment (M2 T7, D2): exploits that attack the agent
 
-Findings 01 and 02 attack the API, which the contract above was written for. **Findings 03 and 04
+Findings 01 and 02 attack the API, which the contract above was written for. **Findings 03 to 06
 attack the agent**, and the agent is not an HTTP service. It is a one-shot container
 (`docker compose run agent`). Two of the rules above cannot hold for them as written, so they are
 amended here rather than bent quietly:
@@ -106,9 +106,13 @@ Shared code for both lives in `attacks/agentlab.py`, with its parsers tested in
 
 **Two checks run after the suites (M2 T8), and neither is an exploit:**
 - `leakscan.py` (`make leakscan`, MCP01): no platform secret and no JWT in any audit store.
-- `faults.py` (`make faults`): breaks the gate for real (OPA removed, then the gateway stopped).
-  Exploits 03 and 04 must then exit **2**; an exit 1 under a fault is a silent pass and fails the
-  check. 05 and 06 join this check at M3 T9.
+- `faults.py` (`make faults`): breaks the gate for real (OPA removed, then the gateway stopped,
+  then the authority route made unreachable from the gateway, M3 T9). Every exploit that drives the
+  agent (discovered from its source, so a new one joins by existing) must then exit **2 naming the
+  fault**; an exit 1 under a fault is a silent pass and fails the check. Every **control** run reads
+  its session's gateway records before judging its shape (`agentlab.gate_held_up`), so a control
+  that runs first cannot hide a broken gate behind "the control did not behave". Attack runs are not
+  checked there: their verdict reads the attacker's side first, so evidence stays exit 0.
 
 Their judging logic is tested in `attacks/test_ci_checks.py`. They live beside the exploits, not in
 `0*-*/`, so `run.py`'s glob never mistakes them for findings.
