@@ -63,7 +63,7 @@ The thesis in one line: **the agent is a ceiling, never a source.** It may do wh
 
 | Evidence | Where |
 |---|---|
-| 05 (i) and (ii) exit 1 hardened (`role_does_not_permit` on both), 0 vulnerable; (ii) also requires the session's records to read `role_now` admin first and viewer last | `attacks/05-confused-deputy/`, `attacks/run.py`, CI on every push |
+| 05 (i) and (ii) exit 1 hardened (`role_does_not_permit` on both), 0 vulnerable; (ii) also requires the session's records to read `role_now` admin first and viewer last | `attacks/05-confused-deputy/`, `attacks/run.py`, CI on every pull request and push to main |
 | Positive controls in both modes: an admin's agent delete and a member's agent update are **allowed** and take effect. Without them, a role leg that denied everything would print the exact reason asserted. | `exploit.py`'s `positive_controls` |
 | Every leg allows and denies alone; `Failing()` matches the policy's leg order; every policy tool has an action | `app/authz/authority_test.go` |
 | The execution routes re-check and never write on a refusal | `TestInternalToolsRecheckAndNeverWriteOnRefusal` |

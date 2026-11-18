@@ -60,7 +60,7 @@ Its check is the second leg, immediately after `unknown_tool` and before every s
 
 | Evidence | Where |
 |---|---|
-| 06 exits 1 hardened (`control_plane_not_delegable`, decided on `role_now: admin` so the role leg cannot be the reason), 0 vulnerable (mallory logs in again and her direct delete returns 204) | `attacks/06-policy-plane/`, CI on every push |
+| 06 exits 1 hardened (`control_plane_not_delegable`, decided on `role_now: admin` so the role leg cannot be the reason), 0 vulnerable (mallory logs in again and her direct delete returns 204) | `attacks/06-policy-plane/`, CI on every pull request and push to main |
 | Positive control in both modes: the owner's direct role change is allowed, then reverted | `exploit.py` |
 | The leg denies even when granted, in scope and admin; it outranks every session leg; no org grants a listed tool; data cannot empty the list | `gateway/policy/policy_test.rego` (`test_non_delegable_even_when_granted_in_scope_and_admin`, `test_delegability_comes_before_every_session_leg`, `test_no_org_is_granted_a_non_delegable_tool`, `test_the_denylist_is_not_policy_data`) |
 | No internal route for any listed tool: every method, both route shapes, both modes, the mux's own 404, beside a positive control that the probe reaches document routes | `app/api/non_delegable_test.go` (`TestNonDelegableToolsHaveNoInternalRoute`, which parses the policy's list) |
