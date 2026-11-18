@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 BASE_URL ?= http://localhost:8080
 
-.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks test-gateway-image faults leakscan agent verify-agent-builds verify-agent-images wait require-hardened-secrets test-detections
+.PHONY: help up down logs ps migrate seed harden test attack detect clean test-policy test-gateway test-fixtures test-attacks test-gateway-image faults leakscan agent verify-agent-builds verify-agent-images wait require-hardened-secrets test-detections measure measure-dry-run
 DATABASE_URL ?= postgres://bazaar:bazaar@127.0.0.1:5432/bazaar?sslmode=disable
 
 help: ## Show this help
@@ -203,6 +203,16 @@ detect: ## Replay PoCs and measure detect vs. miss (both modes; M1 API rule + M2
 
 test-detections: ## Run the detection-rule and replay-judge tests (stdlib unittest, no stack)  (M1 T8, M2 T9, M3 T10)
 	python3 -m unittest discover -s detections -t detections -p 'test_*.py' -v
+
+EXP ?= 03-injection-compliance
+
+measure-dry-run: ## Print an injection experiment's requests, EXP=<dir under experiments/> (free: no key, no network)  (M2, T-Measure)
+	cd app && go run ./cmd/measure -dir ../experiments/$(EXP) -dry-run
+
+measure: ## Run an injection experiment ONCE, as pre-registered, EXP=<dir> (needs MODEL_API_KEY + MODEL_BASE_URL; never CI)  (M2, T-Measure)
+	@test -n "$$MODEL_API_KEY" || { echo "MODEL_API_KEY is not set -- run: read -rs MODEL_API_KEY && export MODEL_API_KEY"; exit 2; }
+	@test -n "$$MODEL_BASE_URL" || { echo "MODEL_BASE_URL is not set -- name where the key goes, e.g. MODEL_BASE_URL=https://api.anthropic.com"; exit 2; }
+	cd app && go run ./cmd/measure -dir ../experiments/$(EXP)
 
 clean: down ## Stop everything and prune build cache
 	docker builder prune -f

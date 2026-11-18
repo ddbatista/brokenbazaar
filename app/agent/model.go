@@ -18,8 +18,12 @@ func (a Action) IsTool() bool { return a.Tool != "" }
 
 // Model is the agent's model interface. One method, a pure function from
 // assembled context to action. Two implementations are planned:
-// ScriptedModel (below, ships now) and RemoteModel (D1b, an experiment
-// run outside CI against any OpenAI-compatible endpoint).
+// ScriptedModel (below, ships now) and a real model, which landed as
+// app/measure (D1b's experiment, run outside CI against the Anthropic
+// Messages API -- not "any OpenAI-compatible endpoint" as first planned;
+// TM D1). The experiment drives the model directly rather than through
+// this interface: it renders each arm once and counts the action the
+// model emits, and never executes one.
 type Model interface {
 	Next(spans []Span) Action
 }
