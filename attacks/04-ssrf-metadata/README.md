@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Run it on localhost only.
 
-**Boundary:** B5 (Agent → Tools), B7 (App → Cloud) · **Leaf:** B7 1.1 via B5 3.2 / B5 4.3; redirect variant B7 1.2 · **Frameworks:** LLM06:2025 (Excessive Agency) · MCP05:2025 · A10:2021 (SSRF)
+**Boundary:** B5 (Agent → Tools), B7 (App → Cloud) · **Leaf:** B7 1.1 via B5 3.2 / B5 4.3; redirect variant B7 1.2 · **Frameworks:** LLM06:2025 (Excessive Agency) · ASI02 2026 (Tool Misuse and Exploitation) · MCP05:2025 · A10:2021 (SSRF)
 
 ## What it does
 
@@ -35,9 +35,9 @@ The vulnerable agent executes tools in-process (`NaiveExecutor`, `app/agent/exec
 
 In hardened mode the agent binary contains **no tool code** (D5). It asks the gateway, which:
 
-1. resolves the hostname **once** and evaluates the **resolved address** (SR-B5-3);
+1. resolves the hostname and evaluates the **resolved address**, not the name (SR-B5-3);
 2. evaluates the allowlist leg, then the range leg (D6). `metadata.google.internal` is **on** the allowlist deliberately, modelling the operator mistake the range leg exists for: the name passes and the address does not;
-3. dials the IP it validated, so there is no second DNS lookup to win (DNS rebinding, B7 1.2);
+3. if the policy allows, its fetcher resolves the host itself, checks that address against the same allowlist and ranges, and **dials that exact IP**. No lookup happens between the fetcher's check and its connection, so there is no second DNS answer to win (DNS rebinding, B7 1.2). The policy decision and the fetcher each resolve once; the fetcher's check is the one bound to the socket. *Corrected at M2 T10: this line said the gateway resolves "once" overall.*
 4. re-evaluates **every redirect hop** in the fetcher (SR-B7-1).
 
 ## Evidence contract

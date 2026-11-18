@@ -440,3 +440,41 @@ An assertion of `exit_code: 1` alone, or of "no data reached the collector," wou
 - **M4a inherits the record-as-capability shape that M2 rejected** (D5): external MCP tools cannot live inside the gateway, so mediating a tool you do not own needs a presented decision ID verified against a license store mounted read-only to everyone but the issuer. M2 rejected the mechanism for first-party tools — three processes, an ID-replay hole needing consumed-marking, a third `HARDENED` reader — and M4a inherits both the shape and those three problems as its opening design questions.
 - **Repo layout amendment:** a new top-level `experiments/` (D1c) and a new `collector` compose fixture (D6). Both get a row in the README layout table in the same commit that creates them. The M0 layout is a dated artifact; this is the amendment recorded, not a silent row.
 - **Queued for the `v1` spec revision** (not raised singly — a spec amended continuously is a spec nobody re-reads): A8.2's scope note that it describes the M3 product, and A8.10's application-layer-vs-network-layer split, which is the same two-claims-in-one-sentence defect M1 found in A8.3.
+
+---
+
+## 9. At module close (2026-11-17)
+
+Appended at T10. §1 to §8 are the record as of T1 and are not edited. This section says what became of §8's follow-ups and of the residuals that had an answer pending, and what M2 hands on.
+
+**Closed by M2:**
+- **R-M2-1's real-model run happened, and its answer is narrower than hoped.** Two experiments, each pre-registered and run once, outside CI (`experiments/`).
+  - Opus 5.5: **unmeasured**. The provider's classifier refused 150/150 before generation.
+  - GLM-5.3: **0/150 complied**. B is 0/50, Wilson 95% upper ≈ 7%. The channel comparison is unresolved, because every arm is at 0.
+
+  Finding 03 stands on the missing gate, not on a compliance rate. The coverage map declares the limit.
+- **D1's arms corrected a claim this diff's readers might draw.** The naive assembler's merge (B4 2.1) applies to the *stored* transcript only. Finding 03's live path reads the document during the run, as a tool span, in both builds (T-Measure D4). `attacks/03-indirect-injection/README.md` was corrected at T10.
+- **Mode agreement** (M2-N4) landed in T6. The mode is parsed once, strictly (`app/mode`), and in hardened mode an unset `TOOLS_SECRET` is a startup failure in either service. That also closes §8's `HARDENED` typo-tolerance item.
+- **The plan's M2 line** was amended to match D2: no judge in M2.
+- **The layout amendment.** The `collector` fixture got its row in T6. `experiments/` did **not** get its row in the commit that created it, contrary to §8. It was added at T10, late, and is recorded here rather than smoothed over.
+- **The `ForOrg` residual** went into M3's diff as M3-N1, where the session plane's coverage and the agent's credential are restated.
+
+**Carried, with an address:**
+- **M4a inherits the judge** and its two questions (D2, M2-N5, M2-N3's audit of the question set), **and the record-as-capability shape** for tools the platform does not own (D5's rejected mechanism), with its three opening problems.
+- **`SR-B1-1`'s route table governs routes in the table, not routes that bypass it**, and the gateway has no equivalent table.
+- **R-M2-2, R-M2-3 and R-M2-5** stay accepted as stated in §6, and are declared in `coverage/README.md`.
+- **R-M2-4** (SR-B3-1…-8 violated by design) was handed to M3 as planned. M3's diff (`m3-delegation.md`) owns the enforcement, and findings 05 and 06 exercise it.
+- **The `v1` spec queue**, one revision, not raised singly:
+  - §8's two items: A8.2's scope note and A8.10's split;
+  - `SR-B5-1`'s subject-vs-testimony narrowing (M2-N3);
+  - from T2's conformance review, `docs/product-spec.md` §4's four renames: `agent_session` → `sessions`, `tool_call` → `tool_calls`, `acting_for_user_id` → `acting_for`, `decision` → `route`;
+  - the missing `messages` entity: §5.1's flow says *"User sends a message"*, and §4 has nowhere to put one. A gap, not a rename.
+- **Found while writing M2's design docs at T10:** gaps in what the controls' tests reach, not exploits. No module owns them yet. They are candidates for a hardening pass before M4a, whose installed tools will reuse this fetcher and this gate. Each is stated in [`defenses/mediation-by-absence.md`](../defenses/mediation-by-absence.md) or [`defenses/the-resolved-value-is-what-executes.md`](../defenses/the-resolved-value-is-what-executes.md).
+  - **Hop 1 is resolved twice.** The gate's enrichment and the fetcher look the host up separately. It stays safe, because the fetcher re-checks the address it dials, but the pre-record's `resolved.ip` may not be the address that was dialled. *"The record is a faithful account"* (A8.9) is weaker here than it reads.
+  - **`default_dial` is untested.** Every fetcher test injects a dialler.
+  - **"No record, no execution" is tested on a deny only.** No test drives an allowed call through an unwritable audit, and no Go test drives `GatewayExecutor`'s transport-failure branch.
+  - **`verify-agent-images` is not in CI,** and `verify-agent-builds` checks two symbol names.
+  - **An `https` URL to an allowlisted host is denied `resolved_address_denied`**, a reason that is not true; it reaches the policy unresolved. (To a host off the allowlist, `egress_not_allowlisted` fires first.)
+  - **The hardened fetcher has no response-size cap.** The naive one caps at 64 KiB.
+  - **`is_denied_range`'s docstring said `ipaddress` collapses octal and decimal forms.** It rejects them; `getaddrinfo` canonicalises them first. The docstring was corrected at T10; the same claim in `policy.rego`'s leg-8 comment is a hardened zone, corrected through T10's issue.
+- **Authorship, for M6.** M2 was built by two coding agents: Hermes Agent for T0–T5, and Claude Code from T6. The answer keys for 03 and 04 record the evidence for each and its weakest row.

@@ -158,7 +158,7 @@ Published per module, at that module's publish time — not held back to the end
 - why it was plausible (what a real developer would have done)
 - the boundary it crosses
 - the control that fixes it, and where that control lives
-- **whether the code was written by an agent or by hand**
+- **whether the code was written by an agent or by hand**, naming the agent, or **agent-drafted, applied by hand** for hardened-zone code. The values are defined once, in [`AGENTS.md`](../AGENTS.md#attribution)
 
 That last field is the dataset for the M6 AI-assisted-development writeup. It only has value if it is accurate.
 

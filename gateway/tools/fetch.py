@@ -154,12 +154,15 @@ def default_dial(ip: str, port: int, method: str, path: str,
 def is_denied_range(ip: str) -> bool:
     """Deny by RANGE, never by string match (SR-B7-1).
 
-    `ipaddress` parses the address and compares it against the actual
-    network blocks, so 169.254.169.254, 0251.0376.0251.0376 (octal),
-    2852039166 (decimal) and ::ffff:169.254.169.254 (v4-mapped v6) all
-    collapse to the same answer. A denylist of strings catches the first
-    and misses the rest -- leaf B7 1.2 -- which is exactly the argument
-    M2-N2 makes about redaction in the other direction.
+    `ip` is what the resolver returned, never what the caller wrote:
+    getaddrinfo canonicalises 0251.0376.0251.0376 (octal) and 2852039166
+    (decimal) to 169.254.169.254 before this function sees them.
+    (`ipaddress` itself REJECTS those two spellings; it is the resolver
+    that collapses them -- corrected at M2 T10.) `ipaddress` then compares
+    the address against the actual network blocks, unwrapping
+    ::ffff:169.254.169.254 (v4-mapped v6) first. A denylist of strings
+    catches the dotted form and misses the rest -- leaf B7 1.2 -- which is
+    exactly the argument M2-N2 makes about redaction in the other direction.
     """
     addr = ipaddress.ip_address(ip)
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:

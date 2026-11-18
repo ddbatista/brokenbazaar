@@ -3,6 +3,7 @@
   "boundary": "B5, B7",
   "frameworks": [
     "LLM06:2025",
+    "ASI02 2026",
     "MCP05:2025",
     "A10:2021"
   ],
