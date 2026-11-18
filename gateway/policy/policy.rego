@@ -191,10 +191,11 @@ violations contains "egress_not_allowlisted" if {
 # Leg 8 -- the resolved address.
 #
 # SR-B7-1: by range, never by string match. The classification is
-# computed by the gateway with ipaddress parsing (the same tested
-# function the fetcher uses), so octal, decimal and v4-mapped-v6
-# encodings of 169.254.169.254 all collapse to the same answer before
-# policy ever sees them.
+# computed by the gateway from the RESOLVED address (the same tested
+# function the fetcher uses). getaddrinfo canonicalises octal and decimal
+# spellings of 169.254.169.254 before classification, and ipaddress
+# unwraps v4-mapped-v6, so all of them reach this leg as one answer.
+# (ipaddress alone rejects the octal and decimal forms -- corrected at M2 T10.)
 violations contains "resolved_address_denied" if {
 	tool == "http_fetch"
 	object.get(resolved, "denied_range", true) == true

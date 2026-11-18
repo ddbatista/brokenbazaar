@@ -174,4 +174,6 @@ code that imports the dependency exists, it removes the dependency and empties `
 
 Each entry in an `ANSWER-KEY.md` records whether the code was written by an agent or by hand. Answer
 honestly when asked to fill that field — the value of the M6 writeup depends entirely on that column
-being accurate.
+being accurate. Code in a hardened zone that the agent drafted — in a `PROPOSED-*.md` file or an issue — and a
+human applied as their own commit, is **agent-drafted, applied by hand**, with that proposal as its
+evidence — neither "agent" (it hides the human gate) nor "by hand" (it is false).
