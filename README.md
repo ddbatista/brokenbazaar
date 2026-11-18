@@ -26,8 +26,8 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 |---|---|---|---|
 | M0 Foundation | all | [`v0-baseline.md`](threat-models/v0-baseline.md) | ✅ complete |
 | M1 Tenancy & Identity | B1, B2 | [`m1-tenancy.md`](threat-models/m1-tenancy.md) | ✅ complete — [01](attacks/01-cross-tenant-read/) · [02](attacks/02-jwt-org-claim/) |
-| M2 Agent & Tool Gateway | B3, B4, B5 | [`m2-agent-gateway.md`](threat-models/m2-agent-gateway.md) | 🚧 in progress — threat model landed, build next |
-| M3 Delegation & Confused Deputy | B3, B5, B8 | — | ⬜ not started |
+| M2 Agent & Tool Gateway | B3, B4, B5 | [`m2-agent-gateway.md`](threat-models/m2-agent-gateway.md) | ✅ complete — [03](attacks/03-indirect-injection/) · [04](attacks/04-ssrf-metadata/) · real-model [experiments](experiments/) |
+| M3 Delegation & Confused Deputy | B3, B5, B8 | [`m3-delegation.md`](threat-models/m3-delegation.md) | 🚧 built — publishing next |
 | M4a Marketplace (MCP) | B6 | — | ⬜ not started |
 | M4b Marketplace (Skills) | B9 | — | ⬜ not started |
 | M6 Publish & Program | — | — | ⬜ not started |
@@ -51,7 +51,7 @@ Every finding names the boundary it crosses.
 | **B8** | Control plane ↔ data plane (who can change policy) |
 | **B9** | Platform ↔ context supply chain (who may place *instructions* in the agent's context) |
 
-**Why B9 is its own boundary.** B5 is mediated by the gateway: every tool call passes allowlist → judge → policy. B4 says untrusted content is wrapped and marked as data, never concatenated as instructions. A poisoned *skill* defeats both by construction — it never crosses B5 (it enters at context-assembly time, before any tool call exists), and B4's rule is inapplicable because a skill *is* instructions the agent is meant to obey.
+**Why B9 is its own boundary.** B5 is mediated by the gateway: every tool call passes a deterministic policy (the LLM judge is deferred to M4a, M2 D2). B4 says untrusted content is wrapped and marked as data, never concatenated as instructions. A poisoned *skill* defeats both by construction — it never crosses B5 (it enters at context-assembly time, before any tool call exists), and B4's rule is inapplicable because a skill *is* instructions the agent is meant to obey.
 
 ## Run it
 
@@ -73,8 +73,10 @@ make harden      # hardened    — the same attacks exit non-zero
 The lifecycle is runnable end to end, asserted, in both modes:
 
 ```bash
-JWT_SECRET=<any-value> make attack   # both PoCs × both modes, asserted (regression suite)
-JWT_SECRET=<any-value> make detect   # replay + probe sweep; measured detect-vs-miss matrix
+export JWT_SECRET=<any-value> TOOLS_SECRET=<any-value>   # hardened mode refuses to start without them
+make attack   # every PoC × both modes, asserted (regression suite)
+make detect   # replays + probe sweep; measured detect-vs-miss matrices
+make faults   # a broken gate must never read as "control held" (hardened)
 ```
 
 ## Layout
@@ -88,6 +90,7 @@ JWT_SECRET=<any-value> make detect   # replay + probe sweep; measured detect-vs-
 | `detections/` | Detection rules + replay harness + coverage report |
 | `fixtures/` | Attacker-controlled artifacts as first-class test data. M2 adds two Compose fixtures from one image: `collector` (`attacker.example`, the exfiltration sink finding 03 asserts against — **a layout amendment**: it was not in the M0 reservations, see `threat-models/m2-agent-gateway.md` D6) and `mock-metadata` (`metadata.google.internal`, finding 04). `evil-mcp/` (M4a) and `evil-skill/` (M4b) follow |
 | `threat-models/` | v0 baseline + one diff per module, committed *before* the feature |
+| `experiments/` | Pre-registered real-model measurements, each run once, outside CI (M2 D1b/D1c — **a layout amendment**, recorded in `threat-models/m2-agent-gateway.md` §8). `make measure` reads the key from `MODEL_API_KEY` only |
 | `coverage/` | Framework map + **declared non-coverage** |
 | `writeups/` | Blog-grade, one per finding |
 | `infra/` | Reserved — deployment topology is out of scope for now |

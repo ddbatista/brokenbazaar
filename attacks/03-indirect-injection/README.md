@@ -2,7 +2,7 @@
 
 > **BrokenBazaar is a deliberately vulnerable application, published as a security learning resource for security practitioners.** Run it on localhost only.
 
-**Boundary:** B4 (Agent ↔ untrusted content), B5 (Agent → Tools), B3 (session scope, the least-privilege variant) · **Leaf:** B4 1.1 → 2.1 → 5.1; B3 2.1 · **Frameworks:** LLM01:2025 (Prompt Injection) · MCP06:2025 · MCP10:2025
+**Boundary:** B4 (Agent ↔ untrusted content), B5 (Agent → Tools), B3 (session scope, the least-privilege variant) · **Leaf:** B4 1.1 → 5.1 via B5 2.1; B3 2.1 · **Frameworks:** LLM01:2025 (Prompt Injection) · ASI01 2026 (Agent Goal Hijack) · MCP06:2025 · MCP10:2025
 
 ## What it does
 
@@ -33,7 +33,7 @@ The least-privilege variant is M3's answer to the third failure below. Session s
 
 In vulnerable mode, three platform failures line up:
 
-1. **The context assembler** concatenates document text into the model's instructions with no labels (`NaiveAssembler`, B4 2.1).
+1. **The context assembler** merges the *stored* transcript into one unlabelled system span (`NaiveAssembler`, B4 2.1). This PoC does not depend on it: the document is read *during* the run and arrives as its own untrusted tool span in both builds, as found when M2's real-model experiment was designed (`experiments/03-injection-compliance/README.md`, T-Measure D4: A-stored measures the merge, A-live measures this path). Corrected at M2 T10; earlier this line said the document itself was concatenated into the instructions.
 2. **The tool executor** bypasses the gateway (`NaiveExecutor`, B5 2.1), so the fetch has no allowlist.
 3. **The session** holds `http_fetch` although a summary needs only `read_document`. Every grant is in scope (D7, B3 2.1; M3 owns the fix).
 
