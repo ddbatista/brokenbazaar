@@ -45,7 +45,7 @@ Requirement: [`threat-models/m1-tenancy.md`](../threat-models/m1-tenancy.md) §3
 
 This section is the honest centre of the document, because this control's cost was paid publicly.
 
-- **SR-B1-3 broke CI for 16 days.** `docker-compose.yml` never forwarded `JWT_SECRET` to the `api` container, so the moment hardened mode refused to start, the `stack / hardened mode also starts` job failed on every push — first red run `38195487230`, green again at `39363799544`. The control worked **exactly as designed**; the build was wrong. That is the deal a refuse-to-start control makes: it converts a configuration gap into an outage, on purpose, and you pay for it in the build pipeline.
+- **SR-B1-3 broke CI for 16 days.** `docker-compose.yml` never forwarded `JWT_SECRET` to the `api` container, so the moment hardened mode refused to start, the `stack / hardened mode also starts` job failed on every pull request and push to main — first red run `38195487230`, green again at `39363799544`. The control worked **exactly as designed**; the build was wrong. That is the deal a refuse-to-start control makes: it converts a configuration gap into an outage, on purpose, and you pay for it in the build pipeline.
 
   It was left red deliberately rather than patched, because both available fixes touched hardened zones. Documented as a named exception at the time instead of discovered later.
 

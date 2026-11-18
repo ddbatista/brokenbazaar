@@ -126,7 +126,7 @@ make up      && python3 attacks/01-cross-tenant-read/exploit.py   # exit 0  — 
 make harden  && python3 attacks/01-cross-tenant-read/exploit.py   # exit !0 — control holds
 ```
 
-CI runs every PoC in both modes on every push. A control that stops working is a build failure.
+CI runs every PoC in both modes on every pull request and push to main. A control that stops working is a build failure.
 
 ## expected.json
 

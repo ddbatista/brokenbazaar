@@ -36,7 +36,7 @@ The rule (`rule.py`, pure function, unit-tested in `test_rule.py`): alert when o
 
 > **A denial-based detector is coupled to the control working.** Where the control blocks *silently* — indistinguishability (SR-M1-4) makes the hardened 404 and "no such org" the same line — or blocks *earlier* (the verifier, before authz exists), detection is blind by design.
 
-That is why the T7 regression suite (`make attack`, CI on every push) and this detector are **complementary mechanisms covering disjoint failure worlds**: the suite catches the day a control *stops working* (exploit flips to exit 0 → CI red); the detector catches the *live attacker probing a working system* (denial burst → alert). Neither covers the other's world. The matrix is the measured proof of that claim, printed on every `make detect`.
+That is why the T7 regression suite (`make attack`, CI on every pull request and push to main) and this detector are **complementary mechanisms covering disjoint failure worlds**: the suite catches the day a control *stops working* (exploit flips to exit 0 → CI red); the detector catches the *live attacker probing a working system* (denial burst → alert). Neither covers the other's world. The matrix is the measured proof of that claim, printed on every `make detect`.
 
 ## Collection window is part of the rule's correctness
 

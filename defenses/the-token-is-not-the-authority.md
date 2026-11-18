@@ -35,6 +35,8 @@ The thesis in one line: **a signed claim is authenticated, not authorized.** The
 
 **D — Remove `org_id` from the token entirely.** The right answer, **not taken in M1**, deferred as R-M1-3 with M3 as the destination. M1-N5 states the residue precisely: a claim that must not be trusted should not be present, because a signed field looks authoritative whether or not anything is entitled to believe it. The control makes the claim worthless; it does not make it absent, and the next developer to read the token cannot tell those apart. Named here as a deferral with an address, not as an oversight.
 
+  **Update, M3 T3 (`ce0183e`, 2026-11-13): taken.** Hardened tokens no longer carry `org_id` or `role` (SR-M1-5). Identity is the token's only claim, and the org and role come from the membership lookup the path already makes. The vulnerable issuer still mints both, because finding 02 needs them.
+
 **E — Trust the claim, but validate it against membership.** This is almost C+SR-B2-2 and differs in one way that matters: validating `claims.OrgID` against membership still makes the claim the *subject* of the question. Resolving from the path makes the claim irrelevant. The second is strictly stronger, because a token with no `org_id` at all behaves identically.
 
 ## 3. What it costs
@@ -46,7 +48,7 @@ The thesis in one line: **a signed claim is authenticated, not authorized.** The
 
 ## 4. What it does not cover
 
-- **R-M1-3 / M1-N5** — the `org_id` claim survives the control and still looks authoritative (option D). Carried to M3.
+- **R-M1-3 / M1-N5** — the `org_id` claim survives the control and still looks authoritative (option D). Carried to M3, and **closed there** for hardened tokens (`ce0183e`, SR-M1-5).
 - **Token revocation.** Nothing here invalidates an issued token early. A one-hour TTL is the only bound, and demotion mid-token takes effect for *authorization* (membership is re-read per request) but not for the token itself.
 - **Credential strength.** Seeded, static, shared password; salted SHA-256, not a KDF. R-M1-4, declared non-coverage.
 - **Rate limiting** — SR-B1-6, deferred in the diff.
@@ -56,7 +58,7 @@ The thesis in one line: **a signed claim is authenticated, not authorized.** The
 | Evidence | Where |
 |---|---|
 | `attacks/02-jwt-org-claim/exploit.py` exits 1 with `CONTROL HOLDS` in hardened mode (401 at the verifier), 0 in vulnerable mode with the forged token printed in full | `expected.json`, `attacks/run.py` |
-| Both modes on every push and the Monday anti-rot cron | `.github/workflows/ci.yml` |
+| Both modes on every pull request and push to main, and the Monday anti-rot cron | `.github/workflows/ci.yml` |
 | Hardened container with no `JWT_SECRET` refuses to start, verified live | M1 T4 |
 
 **SR-B2-2 is not exercised by finding 02.** In hardened mode the exploit dies at the first control — 401 at the verifier — and never reaches the membership check. A reader who assumes a green suite proves both controls is wrong, which is why this is in the document rather than left to be inferred.
@@ -71,7 +73,7 @@ Generalisable, and it is this control's real lesson: **in a layered defence, the
 
    Hold that against [`scope-as-a-property-of-the-handle.md`](scope-as-a-property-of-the-handle.md), where the whole design was to stop scope being a per-call-site value. **The same repo made the opposite choice one package over**, and the inconsistency is real. The defence is that a lab must run both verifiers from one binary, so the mode has to be *some* kind of value — but it did not have to be a bare bool threaded through three layers. Two constructors returning a `Verifier` would have matched the store's design. Recorded rather than smoothed over; the cheap fix is M2's business if the gateway adds a third mode.
 
-2. **`claims.OrgID` is still there, still signed, still populated honestly.** Any future handler that reads it is doing something that looks completely reasonable and is wrong. There is no type, test or lint keeping it out of a new call site — only this paragraph and M1-N5. **Highest-probability rot in M1.**
+2. **`claims.OrgID` is still there, still signed, still populated honestly.** Any future handler that reads it is doing something that looks completely reasonable and is wrong. There is no type, test or lint keeping it out of a new call site — only this paragraph and M1-N5. **Highest-probability rot in M1.** *Update, M3 T3:* in hardened mode the field is now absent, so this rot is closed there. The vulnerable issuer still populates it, by design.
 
 3. **One caller.** `resolveHardenedStore` is the single hardened path that resolves a store. A second resolution path added for a new resource re-opens the question from scratch, and nothing connects it to this control.
 

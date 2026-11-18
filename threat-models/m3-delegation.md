@@ -339,3 +339,28 @@ The two-mode contract and exit codes are unchanged: 0 = vulnerable, 1 = control 
   - `SR-B8-1`'s "grants" meaning tool grants, distinct from role assignment;
   - B3 3.1's wording to cover a session record *as asserted by the agent*, not only as stored;
   - `SR-B4-6`'s missing destination.
+
+---
+
+## 9. At module close (2026-11-17)
+
+Appended at T11. §1 to §8 are the record as of T1, and are not edited. This section says what became of §8's follow-ups, and what M3 hands on.
+
+**Closed by M3:**
+- **`POLICY_REASONS`** gained the four authority reasons in T6 and `control_plane_not_delegable` in T7 (`fe8aaee`). A test pins the set to the policy's leg order.
+- **Issue #9** (OPA 1.22.2) was applied before T6.
+- **The fault-injection case for `SR-B8-4`** shipped in T9. The authority route made unreachable from the gateway is fault F3, and every agent exploit exits 2 naming it.
+- **The T10 detection shapes** shipped, with one exception:
+  - **built:** agent-initiated role changes (R5); `role_does_not_permit` and `control_plane_not_delegable` denials (R6), measured in `make detect` in both modes (`detections/README.md`);
+  - **not built:** M3-N6's write-copies-a-read shape, recorded.
+- **The baseline re-map** of 06 to B8 leaf 1.2 is recorded in `coverage/README.md`'s corrections log, as is D3's correction of the plan.
+- **SR-M1-5 / R-M1-3, carried here from M1, was delivered in T3** (`ce0183e`): hardened tokens carry neither `org_id` nor `role`. `m1-tenancy.md` is dated and still says "carried to the M3 diff". The delivery is recorded in `defenses/the-token-is-not-the-authority.md` and in finding 02's answer key.
+
+**Carried, with an address:**
+- **The database-role split** (M3-N1, R-M3-2). The agent connects as a session-plane-only role. It touches `docker-compose.yml` and migrations: a later module's task.
+- **Argument-level provenance → M4b** (M3-N4, R-M3-3).
+- **Membership removal** (M3-N3): tombstone or revoke-and-retain, never cascade.
+- **The role-at-time detection rule for vulnerable mode.** Declared, not built. It needs a second copy of the permission table (D4).
+- **No last-admin guard on the direct role route.** An admin can demote the last admin, themselves included. Recorded at T5 and stated in `app/api/members.go`. Not a finding: a product footgun on the human path, which non-delegability deliberately leaves open.
+- **A malformed uuid in a document or member path returns 500**, not the uniform 404 (recorded at T5). The internal session path was fixed in T6 with `store.IsID`; the others were not.
+- **The `v1` spec queue** in §8, unchanged.

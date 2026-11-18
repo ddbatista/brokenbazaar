@@ -49,3 +49,7 @@ Against the vulnerable build, (ii) shows nothing (i) does not: that executor nev
 
 - **A forged role.** Finding 02's forged token reaches the direct role route in vulnerable mode. That is 02's, not this finding's.
 - **In-role, in-scope writes steered by untrusted content** (M3-N4, R-M3-3). A member's agent steered into an update the member may make is not refused by role, and is not this finding.
+
+## Read next
+
+The argument: [`writeups/05-confused-deputy.md`](../../writeups/05-confused-deputy.md). Why this control: [`defenses/the-session-names-it-never-grants.md`](../../defenses/the-session-names-it-never-grants.md). Which commit planted what, and who wrote it: [`ANSWER-KEY.md`](ANSWER-KEY.md).
