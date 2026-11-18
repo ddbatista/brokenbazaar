@@ -60,4 +60,4 @@ Scope enforced at the handler layer is a rule; scope enforced at the data layer 
 If your tenancy tests live in your handlers, you have as many chances to fail as you have endpoints. If they live in your store constructors, you have one, and everyone's code reviews it.
 
 ---
-*Planted in `cd44140` (store layer), made reachable in `9ba4b2d` (handlers). Control: `app/store/document_org.go` (SR-B2-1). Exploit: `attacks/01-cross-tenant-read/` — exits 0 on the vulnerable stack, 1 on hardened, asserted in CI on every push.*
+*Planted in `cd44140` (store layer), made reachable in `9ba4b2d` (handlers). Control: `app/store/document_org.go` (SR-B2-1). Exploit: `attacks/01-cross-tenant-read/` — exits 0 on the vulnerable stack, 1 on hardened, asserted in CI on every pull request and push to main.*

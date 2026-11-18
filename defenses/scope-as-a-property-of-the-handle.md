@@ -52,7 +52,7 @@ This section exists because a control doc with no cost section is marketing.
 | Evidence | Where |
 |---|---|
 | `attacks/01-cross-tenant-read/exploit.py` exits 1 with `CONTROL HOLDS` in hardened mode, 0 with real leaked bytes in vulnerable mode | `expected.json`, asserted by `attacks/run.py` |
-| Both modes run unattended on every push and on the weekly anti-rot cron | `.github/workflows/ci.yml` |
+| Both modes run unattended on every pull request and push to main, and on the weekly anti-rot cron | `.github/workflows/ci.yml` |
 | The harness asserts the *absent* other-mode marker, so a PoC cannot pass by failing | `attacks/run.py` |
 | Live side-by-side on real seeded rows, before any handler existed: `OrgStore.ForOrg(acme).Search("confidential")` → 1 row; `NaiveStore.Search("confidential")` → 3 rows | M1 T2 verification |
 

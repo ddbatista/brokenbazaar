@@ -58,7 +58,7 @@ The thesis in one line: **a signed claim is authenticated, not authorized.** The
 | Evidence | Where |
 |---|---|
 | `attacks/02-jwt-org-claim/exploit.py` exits 1 with `CONTROL HOLDS` in hardened mode (401 at the verifier), 0 in vulnerable mode with the forged token printed in full | `expected.json`, `attacks/run.py` |
-| Both modes on every push and the Monday anti-rot cron | `.github/workflows/ci.yml` |
+| Both modes on every pull request and push to main, and the Monday anti-rot cron | `.github/workflows/ci.yml` |
 | Hardened container with no `JWT_SECRET` refuses to start, verified live | M1 T4 |
 
 **SR-B2-2 is not exercised by finding 02.** In hardened mode the exploit dies at the first control — 401 at the verifier — and never reaches the membership check. A reader who assumes a green suite proves both controls is wrong, which is why this is in the document rather than left to be inferred.
