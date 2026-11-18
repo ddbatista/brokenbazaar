@@ -53,6 +53,8 @@ MODEL_BASE_URL=https://opencode.ai/zen/go/v1 make measure EXP=03b-injection-comp
 
 The key is read only from `MODEL_API_KEY`, never from `OPENCODE_API_KEY` (D1b).
 
+**Added before the counted run (TM-R1 to R4).** The first attempt was refused in its first round, before any data, with `400 MissingSessionID`: OpenCode Go requires an `x-opencode-session` header, which it uses to route a conversation's requests together and reuse their prompt cache. The harness now sends a **fresh random id per trial**, kept across that trial's retries, so no two trials share routing or cache. It also sends `User-Agent: brokenbazaar-measure/1.0`, as OpenCode asks of clients. Both are transport. The model, the inputs, the arms, n and the outcome are exactly as pre-registered. The run summary records both under `transport`. OpenCode's docs give the Go base URL as `https://opencode.ai/inference/go/openai/v1`, so use whichever your console shows.
+
 ## Results
 
 Written to `RESULTS.md` from the run file, after the single run.

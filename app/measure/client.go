@@ -3,6 +3,8 @@ package measure
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +15,26 @@ import (
 	"strings"
 	"time"
 )
+
+// UserAgent identifies the harness to the provider, as OpenCode's docs ask
+// of every client ("its own user agent ... rather than a generic SDK or
+// HTTP-library name"). A name, never a person: no email, no account.
+const UserAgent = "brokenbazaar-measure/1.0"
+
+// newSessionID is one trial's x-opencode-session: "ses_" and 16 random
+// bytes in hex. OpenCode Go refuses a request without one (400
+// MissingSessionID) and uses it to route a conversation's requests together
+// and reuse their prompt cache. A trial IS one conversation, so each trial
+// gets a fresh id: a shared one would couple trials the analysis treats as
+// independent (plan T-Measure TM-R1). It is not a secret and carries no
+// state the harness relies on.
+func newSessionID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("session id: %w", err)
+	}
+	return "ses_" + hex.EncodeToString(b), nil
+}
 
 // Client speaks the Anthropic Messages API over the standard library
 // (TM D1). Not the SDK: its default client reads ANTHROPIC_API_KEY,
@@ -136,16 +158,21 @@ func (c *Client) Send(ctx context.Context, req Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	r, err := c.attempts(ctx, body)
+	// One trial, one session: every retry below keeps it (TM-R1).
+	session, err := newSessionID()
+	if err != nil {
+		return Reply{}, err
+	}
+	r, err := c.attempts(ctx, body, session)
 	r.Sent = body
 	return r, err
 }
 
-func (c *Client) attempts(ctx context.Context, body []byte) (Reply, error) {
+func (c *Client) attempts(ctx context.Context, body []byte, session string) (Reply, error) {
 	var last Reply
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		r, err := c.once(ctx, body)
+		r, err := c.once(ctx, body, session)
 		if err == nil {
 			return r, nil
 		}
@@ -164,14 +191,18 @@ func (c *Client) attempts(ctx context.Context, body []byte) (Reply, error) {
 	return last, fmt.Errorf("gave up after %d attempts: %w", attempts, lastErr)
 }
 
-func (c *Client) once(ctx context.Context, body []byte) (Reply, error) {
+func (c *Client) once(ctx context.Context, body []byte, session string) (Reply, error) {
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return Reply{}, err
 	}
 	hreq.Header.Set("content-type", "application/json")
+	hreq.Header.Set("user-agent", UserAgent)
 	if c.prereg.Protocol == ProtocolOpenAIChat {
 		hreq.Header.Set("authorization", "Bearer "+c.key)
+		// OpenCode's routing header (TM-R2): sent on this path only, never
+		// to Anthropic. Other OpenAI-compatible servers ignore it.
+		hreq.Header.Set("x-opencode-session", session)
 	} else {
 		hreq.Header.Set("x-api-key", c.key)
 		hreq.Header.Set("anthropic-version", c.prereg.AnthropicVersion)

@@ -326,3 +326,88 @@ func TestTheKeyCheckSeesThroughJSONEscaping(t *testing.T) {
 		t.Error("ContainsKey must match the escaped form")
 	}
 }
+
+// OpenCode Go refuses a request with no x-opencode-session (400
+// MissingSessionID), and uses the id to route requests together and share
+// their prompt cache. A trial is one independent conversation, so each trial
+// gets its own id: one shared id would couple the 150 trials the analysis
+// treats as independent (plan T-Measure TM-R1).
+func TestEachTrialIsItsOwnOpenCodeSession(t *testing.T) {
+	_, p := loadGLM(t)
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("x-opencode-session"))
+		if ua := r.Header.Get("user-agent"); ua != UserAgent {
+			t.Errorf("user-agent %q, want %q", ua, UserAgent)
+		}
+		w.Write(openAIReply("stop", `{"role":"assistant","content":"ok"}`))
+	}))
+	defer srv.Close()
+	c, err := NewClientFor(p, srv.URL+"/v1", testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := c.Send(context.Background(), Request{Model: "glm-5.3", MaxTokens: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("requests: %d", len(seen))
+	}
+	distinct := map[string]bool{}
+	for _, s := range seen {
+		if !strings.HasPrefix(s, "ses_") || len(s) < len("ses_")+16 {
+			t.Errorf("session id %q: want ses_ and at least 16 random characters", s)
+		}
+		distinct[s] = true
+	}
+	if len(distinct) != 3 {
+		t.Errorf("three trials shared session ids: %v", seen)
+	}
+}
+
+// A retry is the same trial, so it keeps the trial's session id.
+func TestARetryKeepsItsTrialsSession(t *testing.T) {
+	_, p := loadGLM(t)
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("x-opencode-session"))
+		if len(seen) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Write(openAIReply("stop", `{"role":"assistant","content":"ok"}`))
+	}))
+	defer srv.Close()
+	c, err := NewClientFor(p, srv.URL+"/v1", testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.sleep = noSleep
+	if _, err := c.Send(context.Background(), Request{Model: "glm-5.3", MaxTokens: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] == "" || seen[0] != seen[1] {
+		t.Errorf("a retry changed or dropped the session: %v", seen)
+	}
+}
+
+// The header is OpenCode's: the Anthropic path never sends it.
+func TestTheAnthropicPathSendsNoOpenCodeSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s := r.Header.Get("x-opencode-session"); s != "" {
+			t.Errorf("anthropic request carried x-opencode-session %q", s)
+		}
+		if ua := r.Header.Get("user-agent"); ua != UserAgent {
+			t.Errorf("user-agent %q, want %q", ua, UserAgent)
+		}
+		w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+	c, err := NewClient(srv.URL, testKey, "2026-10-21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Send(context.Background(), Request{Model: "claude-opus-5-5", MaxTokens: 10})
+}

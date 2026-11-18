@@ -117,6 +117,14 @@ func main() {
 		"anthropic_version": p.AnthropicVersion, "sampling": p.Sampling, "base_url": base,
 		"n_per_arm": p.NPerArm, "summary": sum, "completed": runErr == nil,
 	}
+	// What the transport added beyond the pre-registered body (TM-R2, R3):
+	// recorded, because a reader of the run should not have to read the
+	// client to know that each OpenCode trial was its own session.
+	transport := map[string]any{"user_agent": measure.UserAgent}
+	if p.Protocol == measure.ProtocolOpenAIChat {
+		transport["x-opencode-session"] = "a fresh random id per trial, kept across that trial's retries"
+	}
+	summary["transport"] = transport
 	if runErr != nil {
 		summary["stopped"] = runErr.Error()
 	}
