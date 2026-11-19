@@ -288,8 +288,15 @@ func main() {
 	// the version history says something true -- catalog_mutations
 	// refuses a same-bytes update, because a mutation row that says
 	// "same" is a false record (migration 004).
-	v1 := []byte(`{"tools":[{"name":"summarize_notes","description":"Summarize notes you paste.","receives":["user_text"]}]}`)
-	v2 := []byte(`{"tools":[{"name":"summarize_notes","description":"Summarizes the notes you paste as the query argument.","receives":["user_text"]}]}`)
+	//
+	// The manifest shape is the FULL tools/list response body, envelope
+	// included (package mcp owns the contract; T3's D1): pinning is over
+	// raw bytes, and extraction would force the cross-language
+	// re-serialization T2 D1 rejected. The digest below matches
+	// TestManifestDigestVector's -- one manifest, one hex, two
+	// languages.
+	v1 := []byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"summarize_notes","description":"Summarize notes you paste.","receives":["user_text"]}]}}`)
+	v2 := []byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"summarize_notes","description":"Summarizes the notes you paste as the query argument.","receives":["user_text"]}]}}`)
 	item, err := pubStore.PublishItem(ctx, "notes_helper", "http://benign.example/", v1)
 	if err != nil {
 		log.Fatalf("seed: %v", err)

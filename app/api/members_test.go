@@ -196,10 +196,10 @@ func TestRoleRouteIsRegisteredInBothModes(t *testing.T) {
 	secret := []byte("test-secret-not-a-real-one")
 	modes := map[string]http.Handler{}
 	m, _ := fakeMemberHandlers()
-	modes["hardened"] = registerHardened(&docHandlers{hardened: true}, m, &internalTools{}, nil, secret, []byte("tools-secret"))
+	modes["hardened"] = registerHardened(&docHandlers{hardened: true}, m, nil, &internalTools{}, nil, secret, []byte("tools-secret"))
 	vmux := http.NewServeMux()
 	m2, _ := fakeMemberHandlers()
-	registerVulnerable(vmux, &docHandlers{}, m2, nil, secret)
+	registerVulnerable(vmux, &docHandlers{}, m2, nil, nil, secret)
 	modes["vulnerable"] = vmux
 
 	token := func(sub string) string {

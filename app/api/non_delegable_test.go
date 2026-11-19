@@ -49,10 +49,10 @@ func TestNonDelegableToolsHaveNoInternalRoute(t *testing.T) {
 	it, _ := fakeInternalTools()
 	m, _ := fakeMemberHandlers()
 	modes := map[string]http.Handler{
-		"hardened": registerHardened(&docHandlers{hardened: true}, m, it, nil, secret, []byte("tools-secret")),
+		"hardened": registerHardened(&docHandlers{hardened: true}, m, nil, it, nil, secret, []byte("tools-secret")),
 	}
 	vmux := http.NewServeMux()
-	registerVulnerable(vmux, &docHandlers{}, m, nil, secret)
+	registerVulnerable(vmux, &docHandlers{}, m, nil, nil, secret)
 	modes["vulnerable"] = vmux
 
 	// The probe's own positive control (T0 D3): with the same mux, path

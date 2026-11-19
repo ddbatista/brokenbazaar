@@ -231,9 +231,9 @@ func TestInternalRoutesAreHardenedOnlyAndServiceGuarded(t *testing.T) {
 	secret := []byte("test-secret-not-a-real-one")
 	it, _ := fakeInternalTools()
 	m, _ := fakeMemberHandlers()
-	hard := registerHardened(&docHandlers{hardened: true}, m, it, nil, secret, []byte("tools-secret"))
+	hard := registerHardened(&docHandlers{hardened: true}, m, nil, it, nil, secret, []byte("tools-secret"))
 	vmux := http.NewServeMux()
-	registerVulnerable(vmux, &docHandlers{}, m, nil, secret)
+	registerVulnerable(vmux, &docHandlers{}, m, nil, nil, secret)
 	paths := []struct{ method, path string }{
 		{http.MethodGet, "/internal/sessions/" + sAdmin + "/authority?tool=read_document"},
 		{http.MethodGet, "/internal/tools/read_document?session=" + sAdmin + "&id=" + docA},

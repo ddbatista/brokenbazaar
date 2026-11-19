@@ -175,7 +175,7 @@ func (s sealedMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // /healthz and /auth/token are listed here too, with their existing
 // auth: none, so this one path owns every route and no route can be
 // added without declaring how it is guarded.
-func registerHardened(h *docHandlers, m *memberHandlers, it *internalTools, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
+func registerHardened(h *docHandlers, m *memberHandlers, mk *marketplaceHandlers, it *internalTools, admin *store.AdminStore, secret, toolsSecret []byte) http.Handler {
 	mux := http.NewServeMux()
 	routes := []route{
 		{http.MethodGet, "/healthz", authNone, noClaims(healthzHandler(true))},
@@ -215,6 +215,24 @@ func registerHardened(h *docHandlers, m *memberHandlers, it *internalTools, admi
 		{http.MethodGet, "/internal/sessions/{session_id}/authority", authService, it.authority},
 		{http.MethodPost, "/internal/tools/update_document", authService, it.updateDocument},
 		{http.MethodPost, "/internal/tools/delete_document", authService, it.deleteDocument},
+
+		// M4a T3: the marketplace routes, in BOTH modes -- direct product
+		// surface (the mode divergence is the agent path, T4/T5). Every
+		// entry declares its auth; the install verbs' admin gate is the
+		// authz table's install_tool cell inside the handlers (D8), so a
+		// looser wiring here would still die at the table.
+		//
+		// Open registration is authNone by design (baseline B6 5.2): the
+		// unvetted front door IS the product decision the module attacks.
+		{http.MethodPost, "/publishers/register", authNone, noClaims(mk.registerPublisher)},
+		{http.MethodGet, "/catalog", authToken, mk.listCatalog},
+		{http.MethodPost, "/catalog", authToken, mk.publishListing},
+		{http.MethodGet, "/catalog/{item_id}", authToken, mk.catalogDetail},
+		{http.MethodPatch, "/catalog/{item_id}", authToken, mk.updateListing},
+		{http.MethodPost, "/orgs/{org_id}/installs", authToken, mk.installItem},
+		{http.MethodGet, "/orgs/{org_id}/installs", authToken, mk.listInstalls},
+		{http.MethodDelete, "/orgs/{org_id}/installs/{install_id}", authToken, mk.uninstall},
+		{http.MethodPost, "/orgs/{org_id}/installs/{install_id}/reapprove", authToken, mk.reapprove},
 	}
 	for _, rt := range routes {
 		pattern := rt.method + " " + rt.pattern
@@ -248,7 +266,7 @@ func registerHardened(h *docHandlers, m *memberHandlers, it *internalTools, admi
 // mechanism that makes a forgotten auth check loud (the hardened table above)
 // simply does not exist in this mode, which is the SR-B1-1 contrast the lab is
 // teaching.
-func registerVulnerable(mux *http.ServeMux, h *docHandlers, m *memberHandlers, admin *store.AdminStore, secret []byte) {
+func registerVulnerable(mux *http.ServeMux, h *docHandlers, m *memberHandlers, mk *marketplaceHandlers, admin *store.AdminStore, secret []byte) {
 	mux.HandleFunc("/healthz", healthzHandler(false))
 	mux.HandleFunc("/auth/token", authTokenHandler(admin, secret, false))
 
@@ -264,4 +282,17 @@ func registerVulnerable(mux *http.ServeMux, h *docHandlers, m *memberHandlers, a
 	// (sub) only, never for org or role (plan M3 T5 D1). In this mode sub
 	// itself can be forged through finding 02 -- see members.go.
 	mux.HandleFunc("PATCH /orgs/{org_id}/members/{user_id}", requireToken(secret, false, m.setRole))
+
+	// M4a T3: the marketplace routes, hand-wrapped like the rest of this
+	// mode -- the same handlers, the same admin gate, the same comments
+	// as the hardened table above carry.
+	mux.HandleFunc("POST /publishers/register", mk.registerPublisher)
+	mux.HandleFunc("GET /catalog", requireToken(secret, false, mk.listCatalog))
+	mux.HandleFunc("POST /catalog", requireToken(secret, false, mk.publishListing))
+	mux.HandleFunc("GET /catalog/{item_id}", requireToken(secret, false, mk.catalogDetail))
+	mux.HandleFunc("PATCH /catalog/{item_id}", requireToken(secret, false, mk.updateListing))
+	mux.HandleFunc("POST /orgs/{org_id}/installs", requireToken(secret, false, mk.installItem))
+	mux.HandleFunc("GET /orgs/{org_id}/installs", requireToken(secret, false, mk.listInstalls))
+	mux.HandleFunc("DELETE /orgs/{org_id}/installs/{install_id}", requireToken(secret, false, mk.uninstall))
+	mux.HandleFunc("POST /orgs/{org_id}/installs/{install_id}/reapprove", requireToken(secret, false, mk.reapprove))
 }

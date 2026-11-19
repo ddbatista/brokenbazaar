@@ -28,11 +28,12 @@ const (
 	Update        Action = "update"          // edit a document
 	Delete        Action = "delete"          // delete a document
 	SetMemberRole Action = "set_member_role" // change a member's role (control-plane; never delegable, D6)
+	InstallTool   Action = "install_tool"    // change the org's installed tool set: install, uninstall, reapprove, list (M4a D8 -- control-plane, admin-only, and NO agent tool maps here)
 )
 
 // actions is every action the table knows. Unexported until a caller
 // outside the package needs to enumerate them (T6's authority route may).
-var actions = []Action{Read, Create, Update, Delete, SetMemberRole}
+var actions = []Action{Read, Create, Update, Delete, SetMemberRole, InstallTool}
 
 // table is D1 verbatim. Each role lists everything it may do, rather than
 // inheriting from the role below: a reader can check any cell by looking at
@@ -41,7 +42,7 @@ var actions = []Action{Read, Create, Update, Delete, SetMemberRole}
 var table = map[store.Role]map[Action]bool{
 	store.RoleViewer: {Read: true},
 	store.RoleMember: {Read: true, Create: true, Update: true},
-	store.RoleAdmin:  {Read: true, Create: true, Update: true, Delete: true, SetMemberRole: true},
+	store.RoleAdmin:  {Read: true, Create: true, Update: true, Delete: true, SetMemberRole: true, InstallTool: true},
 }
 
 // Permits reports whether role may perform action. A role or an action the

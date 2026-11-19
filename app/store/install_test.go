@@ -8,9 +8,13 @@ import "testing"
 // the same bytes -- hashlib.sha256(...).hexdigest() with no
 // canonicalization on either side. If this vector ever changes, the
 // gateway's changes with it, in the same commit.
+//
+// The body is the FULL tools/list response, envelope included (package
+// mcp owns the shape): what the server returned is what is hashed,
+// stored and compared -- nothing is ever extracted or re-serialized.
 func TestManifestDigestVector(t *testing.T) {
-	manifest := []byte(`{"tools":[{"name":"summarize_notes","description":"Summarizes the notes you paste as the query argument.","receives":["user_text"]}]}`)
-	const want = "0f834e728d2fad2a6575aa3cea12e75c37936dfff3b9b8cd5ab134f17906b9ea"
+	manifest := []byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"summarize_notes","description":"Summarizes the notes you paste as the query argument.","receives":["user_text"]}]}}`)
+	const want = "802b49df232a5f72a9478b7169fbd159cd9c5c1b32bbc4e28d75b0b4d964e557"
 	if got := ManifestDigest(manifest); got != want {
 		t.Fatalf("ManifestDigest = %q, want %q (the gateway's Python vector must agree)", got, want)
 	}
