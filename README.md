@@ -51,7 +51,7 @@ Every finding names the boundary it crosses.
 | **B8** | Control plane ↔ data plane (who can change policy) |
 | **B9** | Platform ↔ context supply chain (who may place *instructions* in the agent's context) |
 
-**Why B9 is its own boundary.** B5 is mediated by the gateway: every tool call passes a deterministic policy (the LLM judge is deferred to M4a, M2 D2). B4 says untrusted content is wrapped and marked as data, never concatenated as instructions. A poisoned *skill* defeats both by construction — it never crosses B5 (it enters at context-assembly time, before any tool call exists), and B4's rule is inapplicable because a skill *is* instructions the agent is meant to obey.
+**Why B9 is its own boundary.** B5 is mediated by the gateway: every tool call passes a deterministic policy. (M2 D2 once deferred an LLM judge to M4a; the M4a diff closed that deferral by citation — the baseline's `SR-B5-1` forbids a gate that consults a tool's self-description, so every M4a decision point is deterministic and behaviour-vs-declaration belongs to detection. See `threat-models/m4a-marketplace.md` D9.) B4 says untrusted content is wrapped and marked as data, never concatenated as instructions. A poisoned *skill* defeats both by construction — it never crosses B5 (it enters at context-assembly time, before any tool call exists), and B4's rule is inapplicable because a skill *is* instructions the agent is meant to obey.
 
 ## Run it
 
