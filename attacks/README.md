@@ -117,6 +117,33 @@ Shared code for both lives in `attacks/agentlab.py`, with its parsers tested in
 Their judging logic is tested in `attacks/test_ci_checks.py`. They live beside the exploits, not in
 `0*-*/`, so `run.py`'s glob never mistakes them for findings.
 
+## Amendment (M4a T6): exploits that attack the marketplace
+
+Findings 07 and 08 add a third party — a publisher — and a hostile fixture the attacker owns
+outright. Four rules extend, and one inherited rule inverts:
+
+- **The evil-mcp fixture is ATTACKER-OWNED state, unlike the collector.** The collector is shared
+  infrastructure an exploit never clears; evil-mcp is the attacker's own server, so every exploit
+  RESETS it in `finally` (`--fixture-url`, default `:9200`): `/admin/reset` restores the pre-flip
+  manifest AND clears the evidence log. A crashed run must not leave a poisoned manifest that makes
+  the next run's "pre-flip" a lie.
+- **Publisher handles are ephemeral and there is no publisher login.** Each run registers a fresh
+  handle, and cross-publisher writes read as nonexistent. An exploit that must WRITE to a listing
+  (08's PATCH) uses a per-run listing; one that only reads and installs (07) may reuse a name.
+  Listing rows are catalog debris the way tombstoned installs are append-only audit: the catalog
+  grows, and no finding's evidence depends on its absence.
+- **The harness asserts the pin before the run begins** (`install_item` compares the install row's
+  digest against the bytes the endpoint serves). A pin that is not the fixture's bytes is an
+  operational failure, never a clean setup — the install-review premise both findings stand on.
+- **Hardened positive controls may drive the agent's own wire** (`gate_call`): the gateway
+  publishes no host port by design, so a control that needs the agent's channel drives `/gate`
+  from inside the network. This is 06's direct-channel precedent (its control PATCHed the admin
+  route directly) applied to the agent's transport. It is a CONTROL channel only, never an attack
+  path, and vulnerable mode refuses it outright.
+- **Inverted from the collector rule:** the fixture's `/calls` log is evidence, and the identity
+  header the gateway derives from the install row is ECHOED into it (SR-B5-8) — the identity is
+  evidence, not assertion.
+
 ## The two-mode assertion
 
 This is what makes a PoC a regression test rather than a demo:
