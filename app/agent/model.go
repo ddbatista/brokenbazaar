@@ -203,8 +203,62 @@ func (m *ScriptedModel) Next(spans []Span) Action {
 		}
 	}
 
+	// 3.5 An installed-tool imperative, each tool at most once, and only
+	// once something has been read: the query argument is the document
+	// bytes (contentsOf), and a call with no bytes to carry is a call
+	// the model has no material for. The name is NOT validated here -- it
+	// is whatever the sentence said -- because the model cannot know the
+	// platform's tool set; resolution is the executor's, against the
+	// live manifest in this build (the planted 2.4) and against the pin
+	// in hardened mode (T5).
+	if !performed["read_document"] {
+		// fall through to the answer
+	} else {
+		for _, s := range spans {
+			for _, match := range installedToolImperative.FindAllStringSubmatch(s.Text, -1) {
+				name := match[1]
+				if performed[name] {
+					continue
+				}
+				return Action{
+					Tool: name,
+					Args: map[string]string{"query": contentsOf(spans)},
+				}
+			}
+		}
+	}
+
 	// 4. Nothing left to do.
 	return Action{Answer: summarise(spans)}
+}
+
+// installedToolImperative is the marketplace's steering grammar (plan M4a
+// T4): "call <tool> with the document's full contents". GENERIC over the
+// tool name, on purpose -- the model cannot know the platform's tool set,
+// so it trusts whatever name the sentence carries, and the EXECUTOR
+// resolves the name (against the live manifest in this build, against the
+// pin in hardened mode). As crude as fetchImperative, for the same D1a
+// reason: a model that parsed carefully could decline.
+//
+// It matches in ANY span -- a tool description (finding 07: the poison
+// enters through the catalog text, which this build concatenates into the
+// system span) or the user's own request (finding 08: the user names a
+// tool they heard about outside the platform). s.Origin is never consulted.
+var installedToolImperative = regexp.MustCompile(`(?i:\bcall\s+)([a-z0-9_]{1,64})(?i:\s+with\s+the\s+document's\s+full\s+contents)`)
+
+// contentsOf is the document bytes the placeholder substitutes: the
+// concatenation of every tool-result span, exactly what expand() escapes
+// into a URL and the installed-tool grammar sends as the query argument
+// unescaped. One function, both channels, so the two can never disagree
+// about what "the document's full contents" means.
+func contentsOf(spans []Span) string {
+	var payload strings.Builder
+	for _, s := range spans {
+		if s.Role == RoleTool {
+			payload.WriteString(s.Text)
+		}
+	}
+	return payload.String()
 }
 
 // writeTargets is every id any write imperative in the context names --
@@ -240,17 +294,11 @@ func expand(raw string, spans []Span) string {
 	if !strings.Contains(raw, contentsPlaceholder) {
 		return raw
 	}
-	var payload strings.Builder
-	for _, s := range spans {
-		if s.Role == RoleTool {
-			payload.WriteString(s.Text)
-		}
-	}
 	// The placeholder sits in a query value, so the substituted content
 	// is query-escaped. Without this the document's newlines and spaces
-	// would produce a malformed request and the exploit would fail for
-	// a reason that has nothing to do with the control under test.
-	return strings.ReplaceAll(raw, contentsPlaceholder, url.QueryEscape(payload.String()))
+	// would produce a malformed request and the exploit would fail for a
+	// reason that has nothing to do with the control under test.
+	return strings.ReplaceAll(raw, contentsPlaceholder, url.QueryEscape(contentsOf(spans)))
 }
 
 // summarise produces the answer turn. Deterministic and dull on purpose:

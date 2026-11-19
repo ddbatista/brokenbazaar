@@ -136,9 +136,25 @@ func Receives(tool Tool, class string) bool {
 	return false
 }
 
-// Request builds a JSON-RPC request body for the subset's two methods.
-// The id is fixed: the lab's servers never multiplex, and a variable id
-// would be one more thing the fixture and the client could disagree on.
+// Request builds a JSON-RPC request body for tools/list. The id is
+// fixed: the lab's servers never multiplex, and a variable id would be
+// one more thing the fixture and the client could disagree on.
 func Request(method string) []byte {
 	return []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `"}`)
+}
+
+// CallRequest builds the subset's tools/call body. The arguments are a
+// flat string map by contract: the subset has no per-tool schemas, and
+// the one convention every consumer shares is that a tool's content
+// argument is named "query" (the fixture's tools and the model's
+// grammar both speak it).
+func CallRequest(name string, args map[string]string) []byte {
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		// A string map always marshals; refusing loudly here would be
+		// pretending an impossible input is a branch worth handling.
+		panic("mcp: marshalling call arguments: " + err.Error())
+	}
+	return []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":` +
+		`"` + name + `","arguments":` + string(argsJSON) + `}}`)
 }

@@ -117,6 +117,25 @@ func main() {
 		log.Fatalf("agent: %v", err)
 	}
 
+	// M4a T4: the org's installed tools, rendered for the context. In
+	// the vulnerable build this is the POISON SITE -- the publisher's
+	// descriptions concatenated into the platform's own system text (B4
+	// 2.1's merge carrying publisher bytes as platform speech, m4a D5),
+	// fetched LIVE from each server (the planted 2.4). The hardened
+	// build's CatalogText returns "" until T5's pinned, wrapped
+	// mechanism replaces it.
+	catalog, err := agent.CatalogText(ctx, pool, tgt.orgID)
+	if err != nil {
+		// Loud, not silent: a catalog that fails to render is an
+		// operational failure of the run, the same class as an
+		// unreadable transcript.
+		log.Fatalf("agent: rendering the installed catalog: %v", err)
+	}
+	assembledPrompt := systemPrompt
+	if catalog != "" {
+		assembledPrompt = systemPrompt + "\n" + catalog
+	}
+
 	loop := &agent.Loop{
 		Assembler: agent.NewAssembler(),
 		Model:     &agent.ScriptedModel{},
@@ -126,7 +145,7 @@ func main() {
 			SessionID: sess.ID,
 		}),
 		Sessions:     store.ForSession(pool, tgt.orgID, sess.ID),
-		SystemPrompt: systemPrompt,
+		SystemPrompt: assembledPrompt,
 		// T5: the platform context every dispatch and audit record
 		// carries -- set once from the session row, never from anything
 		// the model produced (M2-N3).

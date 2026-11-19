@@ -120,7 +120,7 @@ verify-agent-builds: ## Assert the hardened agent binary contains no in-process 
 	@mkdir -p app/.bin
 	@cd app && go build -o .bin/agent-hardened ./cmd/agent
 	@cd app && go build -tags vulnerable -o .bin/agent-vulnerable ./cmd/agent
-	@cd app && for sym in NaiveExecutor NaiveAssembler; do \
+	@cd app && for sym in NaiveExecutor NaiveAssembler liveManifest marketplaceClient; do \
 		n=$$(go tool nm .bin/agent-hardened | grep -c "$$sym" || true); \
 		if [ "$$n" != "0" ]; then \
 			echo "FAIL: hardened binary contains $$sym ($$n symbols) -- D5 requires no in-process tool code"; exit 1; \
