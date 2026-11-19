@@ -265,5 +265,39 @@ func main() {
 		}
 	}
 
+	// --- M4a: the marketplace's benign fixtures (plan M4a T2) -----------
+	// One publisher nobody attacks, one listing no PoC installs: the
+	// catalog's non-attacker content and the provenance payload's data
+	// (SR-B6-6: publisher age, install count 0, a version history of 2 --
+	// one publish, one real update). The hostile publisher, the poisoned
+	// listing and every install are the exploits' own, through the
+	// product's front door: the supply-chain story is the finding's
+	// premise and must not be pre-staged (m4a D1 -- registration is open
+	// by design, so the PoC uses it). The listing's endpoint is dead on
+	// purpose; real marketplaces have dead listings, and 07's negative
+	// control registers its own REACHABLE clean listing on the fixture
+	// rather than leaning on this one (T6's entry records that).
+	pub, err := admin.RegisterPublisher(ctx, "Standard Notes Tools")
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	fmt.Printf("publisher %-20s %s\n", pub.DisplayName, pub.ID)
+
+	pubStore := store.ForPublisher(pool, pub.ID)
+	// v1's description had a wording bug; v2 fixes it. A real update, so
+	// the version history says something true -- catalog_mutations
+	// refuses a same-bytes update, because a mutation row that says
+	// "same" is a false record (migration 004).
+	v1 := []byte(`{"tools":[{"name":"summarize_notes","description":"Summarize notes you paste.","receives":["user_text"]}]}`)
+	v2 := []byte(`{"tools":[{"name":"summarize_notes","description":"Summarizes the notes you paste as the query argument.","receives":["user_text"]}]}`)
+	item, err := pubStore.PublishItem(ctx, "notes_helper", "http://benign.example/", v1)
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	if _, _, err := pubStore.UpdateItem(ctx, item.ID, v2); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	fmt.Printf("listing   %-20s %s (v2, digest %s)\n", item.Name, item.ID, store.ManifestDigest(v2))
+
 	fmt.Printf("\nseed: done. every seeded user's password is %q (R-M1-4, lab only).\n", seedPassword)
 }
