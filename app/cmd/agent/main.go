@@ -117,23 +117,30 @@ func main() {
 		log.Fatalf("agent: %v", err)
 	}
 
-	// M4a T4: the org's installed tools, rendered for the context. In
-	// the vulnerable build this is the POISON SITE -- the publisher's
-	// descriptions concatenated into the platform's own system text (B4
-	// 2.1's merge carrying publisher bytes as platform speech, m4a D5),
-	// fetched LIVE from each server (the planted 2.4). The hardened
-	// build's CatalogText returns "" until T5's pinned, wrapped
-	// mechanism replaces it.
-	catalog, err := agent.CatalogText(ctx, pool, tgt.orgID)
+	// M4a T4/T5: the org's installed tools, rendered for the context.
+	// The two builds split the channel on purpose (m4a D5): the
+	// vulnerable build concatenates the publisher's descriptions into
+	// the platform's system text -- B4 2.1's merge carrying publisher
+	// bytes as platform speech, finding 07's poison site; the hardened
+	// build pins the descriptions as origin-`publisher` spans, marked
+	// and wrapped, never concatenated. The TEXT the model sees is
+	// identical pre-flip (the pin is what the org reviewed), so the
+	// Action is too (D1a) -- a hardened pass can only come from the
+	// gate.
+	catalogPrompt, err := agent.CatalogPrompt(ctx, pool, tgt.orgID)
 	if err != nil {
 		// Loud, not silent: a catalog that fails to render is an
 		// operational failure of the run, the same class as an
 		// unreadable transcript.
 		log.Fatalf("agent: rendering the installed catalog: %v", err)
 	}
+	catalogSpans, err := agent.CatalogSpans(ctx, pool, tgt.orgID)
+	if err != nil {
+		log.Fatalf("agent: rendering the installed catalog spans: %v", err)
+	}
 	assembledPrompt := systemPrompt
-	if catalog != "" {
-		assembledPrompt = systemPrompt + "\n" + catalog
+	if catalogPrompt != "" {
+		assembledPrompt = systemPrompt + "\n" + catalogPrompt
 	}
 
 	loop := &agent.Loop{
@@ -146,6 +153,7 @@ func main() {
 		}),
 		Sessions:     store.ForSession(pool, tgt.orgID, sess.ID),
 		SystemPrompt: assembledPrompt,
+		Catalog:      catalogSpans,
 		// T5: the platform context every dispatch and audit record
 		// carries -- set once from the session row, never from anything
 		// the model produced (M2-N3).

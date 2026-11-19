@@ -81,8 +81,60 @@ func fakeInternalTools() (*internalTools, *fakeDocs) {
 	return &internalTools{
 		sessions: sessions,
 		docsFor:  func(org string) store.DocumentStore { docs.org = org; return docs },
-		now:      func() time.Time { return t6now },
+		// M4a T5: no installs by default -- the platform-tool tests are
+		// unchanged, and the install-facts test sets its own fake below.
+		installsFor: func(string) installLister { return fakeInstalls{} },
+		now:         func() time.Time { return t6now },
 	}, docs
+}
+
+// fakeInstalls is the install surface for the authority route's tests.
+type fakeInstalls []store.Install
+
+func (f fakeInstalls) Installs(context.Context) ([]store.Install, error) { return f, nil }
+
+// TestAuthorityCarriesInstallFacts (M4a T5): the route answers the org's
+// installs with the pin's own facts -- tool_in_pin and the consent class
+// computed against the PIN, never against anything live.
+func TestAuthorityCarriesInstallFacts(t *testing.T) {
+	pin := `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"summarize_notes","description":"clean","receives":["user_text"]},{"name":"export_notes","description":"wide","receives":["user_text","document_content"]}]}}`
+	it, _ := fakeInternalTools()
+	it.installsFor = func(string) installLister {
+		return fakeInstalls{{
+			ID: "11111111-2222-4333-8444-555555555555", ItemID: "99999999-9999-4999-8999-999999999999",
+			EndpointURL: "http://publisher.example/evil", EndpointAddress: "172.28.0.22",
+			PinnedManifest: pin, PinnedDigest: store.ManifestDigest([]byte(pin)), Status: "active",
+		}}
+	}
+	rec := serve(it.authority, http.MethodGet,
+		"/internal/sessions/"+sAdmin+"/authority?tool=export_notes", "",
+		map[string]string{"session_id": sAdmin})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authority = %d", rec.Code)
+	}
+	var resp struct {
+		Installs []struct {
+			InstallID               string `json:"install_id"`
+			ToolInPin               bool   `json:"tool_in_pin"`
+			ReceivesDocumentContent bool   `json:"receives_document_content"`
+		} `json:"installs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(resp.Installs) != 1 || !resp.Installs[0].ToolInPin || !resp.Installs[0].ReceivesDocumentContent {
+		t.Fatalf("install facts = %+v, want export_notes in the pin with document consent", resp.Installs)
+	}
+
+	// A tool the pin does not name: the facts say so, and the consent
+	// flag is false with them.
+	rec = serve(it.authority, http.MethodGet,
+		"/internal/sessions/"+sAdmin+"/authority?tool=drifted_tool", "",
+		map[string]string{"session_id": sAdmin})
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Installs) != 1 || resp.Installs[0].ToolInPin || resp.Installs[0].ReceivesDocumentContent {
+		t.Fatalf("drifted tool facts = %+v, want tool_in_pin false", resp.Installs)
+	}
 }
 
 func serve(h protectedHandler, method, target, body string, pathValues map[string]string) *httptest.ResponseRecorder {

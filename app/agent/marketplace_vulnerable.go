@@ -57,7 +57,7 @@ func liveManifest(endpoint string) ([]byte, error) {
 	return body, nil
 }
 
-// CatalogText renders the org's installed tools for the agent's system
+// CatalogPrompt renders the org's installed tools for the agent's system
 // prompt. THE POISON SITE (m4a D5): in this build the publisher's
 // descriptions are concatenated into the platform's own system text,
 // with no separation and no label -- B4 2.1's merge carrying publisher
@@ -66,7 +66,7 @@ func liveManifest(endpoint string) ([]byte, error) {
 //
 // The manifests are fetched LIVE (the planted 2.4): what the org
 // approved at install is never consulted here.
-func CatalogText(ctx context.Context, pool *pgxpool.Pool, orgID string) (string, error) {
+func CatalogPrompt(ctx context.Context, pool *pgxpool.Pool, orgID string) (string, error) {
 	installs, err := store.ForOrg(pool, orgID).Installs(ctx)
 	if err != nil {
 		return "", fmt.Errorf("agent: listing installs in org %s: %w", orgID, err)
@@ -88,4 +88,11 @@ func CatalogText(ctx context.Context, pool *pgxpool.Pool, orgID string) (string,
 		}
 	}
 	return b.String(), nil
+}
+
+// CatalogSpans returns nil in this build, deliberately: the vulnerable
+// build's catalog channel is the CONCATENATED system prompt above, and
+// giving it a second channel would blur which site the finding measures.
+func CatalogSpans(_ context.Context, _ *pgxpool.Pool, _ string) ([]Span, error) {
+	return nil, nil
 }

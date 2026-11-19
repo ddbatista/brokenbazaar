@@ -31,6 +31,16 @@ const (
 	OriginSystem    Origin = "system"
 	OriginUser      Origin = "user"
 	OriginUntrusted Origin = "untrusted"
+	// OriginPublisher is M4a D5's fourth trust class: bytes the platform
+	// fetched from a third-party listing -- below platform, at untrusted's
+	// level, and DISTINCT from both. Distinct from untrusted because the
+	// consent leg keys on "untrusted" as the document-bytes source, and a
+	// catalog span is present in every session with an install: marking it
+	// untrusted would deny every installed-tool call, consent or no. The
+	// label exists for the record and for detection (a call whose context
+	// held publisher content says so in derived_from); the marking is
+	// never the defence (SR-B4-3/D1a -- ScriptedModel does not read it).
+	OriginPublisher Origin = "publisher"
 )
 
 // Role is who authored the span. Distinct from Origin: role is evidence
@@ -70,7 +80,10 @@ type Span struct {
 // should be making trust comparisons.
 func trustRank(o Origin) int {
 	switch o {
-	case OriginUntrusted:
+	case OriginUntrusted, OriginPublisher:
+		// Publisher content sits at untrusted's level (m4a D5): it is
+		// external bytes the platform did not author, so an answer
+		// derived from it inherits no trust either.
 		return 0
 	case OriginUser:
 		return 1

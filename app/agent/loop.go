@@ -154,6 +154,14 @@ type Loop struct {
 	// anything the model produced.
 	Session SessionInfo
 
+	// Catalog is the marketplace's context channel (M4a T5): one span
+	// per installed tool description, origin `publisher`, wrapped and
+	// marked -- never concatenated into the system prompt. The hardened
+	// build fills it from the install rows' pinned manifests; the
+	// vulnerable build leaves it nil, because that build's poison site
+	// is the concatenated system prompt instead (m4a D5's two halves).
+	Catalog []Span
+
 	// Audit is D4's second writer, constructed only in vulnerable builds
 	// (NewAgentAudit is build-tagged: nil in hardened, where the
 	// gateway's JSONL is the entire audit trail). Nil means every audit
@@ -186,6 +194,19 @@ func (l *Loop) Run(ctx context.Context) (Outcome, error) {
 		return out, fmt.Errorf("agent: loading transcript: %w", err)
 	}
 	spans := l.Assembler.Assemble(l.SystemPrompt, msgs)
+
+	// The catalog spans sit between the platform's system span and the
+	// transcript: platform speech, then the publisher's speech -- marked
+	// as such -- then the session. In hardened mode this is the ONLY way
+	// publisher bytes enter the context; the assembler itself never
+	// touches them (SR-B6-2: wrapped and marked, never concatenated).
+	if len(l.Catalog) > 0 && len(spans) > 0 {
+		withCatalog := make([]Span, 0, len(spans)+len(l.Catalog))
+		withCatalog = append(withCatalog, spans[0])
+		withCatalog = append(withCatalog, l.Catalog...)
+		withCatalog = append(withCatalog, spans[1:]...)
+		spans = withCatalog
+	}
 
 	maxTurns := l.MaxTurns
 	if maxTurns <= 0 {
@@ -321,6 +342,8 @@ func storeOrigin(o Origin) store.MessageOrigin {
 	case OriginUser:
 		return store.MessageOriginUser
 	default:
+		// OriginUntrusted, and OriginPublisher if a future change ever
+		// persists one: the safe default, never an upgrade.
 		return store.MessageOriginUntrusted
 	}
 }

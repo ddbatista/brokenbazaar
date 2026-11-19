@@ -12,6 +12,7 @@ import (
 
 	"github.com/ddbatista/brokenbazaar/app/auth"
 	"github.com/ddbatista/brokenbazaar/app/authz"
+	"github.com/ddbatista/brokenbazaar/app/mcp"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -51,16 +52,24 @@ type sessionAuthorityLookup interface {
 // org-bound store constructor and a clock, so every leg and every refusal is
 // testable without a database (internal_tools_test.go).
 type internalTools struct {
-	sessions sessionAuthorityLookup
-	docsFor  func(orgID string) store.DocumentStore
-	now      func() time.Time
+	sessions    sessionAuthorityLookup
+	docsFor     func(orgID string) store.DocumentStore
+	installsFor func(orgID string) installLister
+	now         func() time.Time
+}
+
+// installLister is the org-bound install surface the authority route reads.
+// *store.OrgStore satisfies it; the tests fake it.
+type installLister interface {
+	Installs(ctx context.Context) ([]store.Install, error)
 }
 
 func newInternalTools(admin *store.AdminStore, pool *pgxpool.Pool) *internalTools {
 	return &internalTools{
-		sessions: admin,
-		docsFor:  func(orgID string) store.DocumentStore { return store.ForOrg(pool, orgID) },
-		now:      time.Now,
+		sessions:    admin,
+		docsFor:     func(orgID string) store.DocumentStore { return store.ForOrg(pool, orgID) },
+		installsFor: func(orgID string) installLister { return store.ForOrg(pool, orgID) },
+		now:         time.Now,
 	}
 }
 
@@ -77,6 +86,65 @@ type authorityResponse struct {
 	Tool    string     `json:"tool"`
 	RoleNow string     `json:"role_now"`
 	Legs    authz.Legs `json:"legs"`
+	// Installs is the session's org's ACTIVE installs, with the facts the
+	// gateway's marketplace legs decide on (M4a T5): the pin's bytes and
+	// endpoint, and -- computed here, against the PIN, not against any
+	// live manifest -- whether THIS tool is in the pin and whether the
+	// pin's consent covers document content. The gateway fetches live
+	// itself (its egress, its one classifier) and compares digests; these
+	// facts are the platform-owned half (SR-B5-1: the decision derives
+	// from state the reviewed party cannot influence).
+	Installs []installFact `json:"installs"`
+}
+
+// installFact is one active install as the gateway needs it. ToolInPin and
+// ReceivesDocumentContent are computed from the pinned manifest HERE, in Go,
+// by the same parser that validated it at install -- one home for "what does
+// the pin say" (mcp.Parse). A pin that no longer parses (corruption, not an
+// attack surface -- installs are validated at write) reports tool_in_pin
+// false; the gateway's drift check still runs on the digest, so a corrupt
+// pin can never read as verified.
+type installFact struct {
+	InstallID               string `json:"install_id"`
+	ItemID                  string `json:"item_id"`
+	EndpointURL             string `json:"endpoint_url"`
+	EndpointAddress         string `json:"endpoint_address"`
+	PinnedDigest            string `json:"pinned_digest"`
+	PinnedManifest          string `json:"pinned_manifest"`
+	ToolInPin               bool   `json:"tool_in_pin"`
+	ReceivesDocumentContent bool   `json:"receives_document_content"`
+}
+
+// installFacts reads the org's active installs and derives the per-tool
+// facts from each pin. Stable order (store.Installs), so the gateway's
+// candidate selection is deterministic.
+func (it *internalTools) installFacts(ctx context.Context, orgID, tool string) ([]installFact, error) {
+	installs, err := it.installsFor(orgID).Installs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []installFact
+	for _, ins := range installs {
+		fact := installFact{
+			InstallID:       ins.ID,
+			ItemID:          ins.ItemID,
+			EndpointURL:     ins.EndpointURL,
+			EndpointAddress: ins.EndpointAddress,
+			PinnedDigest:    ins.PinnedDigest,
+			PinnedManifest:  ins.PinnedManifest,
+		}
+		if tools, err := mcp.Parse([]byte(ins.PinnedManifest)); err == nil {
+			for _, t := range tools {
+				if t.Name != tool {
+					continue
+				}
+				fact.ToolInPin = true
+				fact.ReceivesDocumentContent = mcp.Receives(t, mcp.ReceivesDocumentContent)
+			}
+		}
+		out = append(out, fact)
+	}
+	return out, nil
 }
 
 // load reads the session and derives the legs for tool, writing the 500 or
@@ -134,11 +202,17 @@ func (it *internalTools) authority(w http.ResponseWriter, r *http.Request, _ aut
 	if !ok {
 		return
 	}
+	installs, err := it.installFacts(r.Context(), s.OrgID, tool)
+	if err != nil {
+		internalError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, authorityResponse{
-		Session: sessionRef{ID: s.SessionID, Org: s.OrgID, ActingFor: s.ActingFor},
-		Tool:    tool,
-		RoleNow: string(s.RoleNow),
-		Legs:    legs,
+		Session:  sessionRef{ID: s.SessionID, Org: s.OrgID, ActingFor: s.ActingFor},
+		Tool:     tool,
+		RoleNow:  string(s.RoleNow),
+		Legs:     legs,
+		Installs: installs,
 	})
 }
 
