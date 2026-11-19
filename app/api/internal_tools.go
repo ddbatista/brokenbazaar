@@ -207,6 +207,19 @@ func (it *internalTools) authority(w http.ResponseWriter, r *http.Request, _ aut
 		internalError(w, err)
 		return
 	}
+	// M4a T5 (mediation): installed-tool calls ride the M3 legs
+	// (m4a-marketplace.md A8.2/A8.6), and their action class is Read --
+	// http_fetch's own precedent (M3 T6 D1: "any role may fetch"). The
+	// org's install decision, not the caller's role, is the authority
+	// boundary (D8), so role is the WRONG leg to distinguish a pinned
+	// name from a drifted one: this applies to every non-platform name
+	// once the org has any active install. A name that is neither
+	// pinned nor live dies at unknown_tool, which evaluates FIRST; a
+	// drifted one is the drift leg's to refuse, which evaluates AFTER
+	// role -- so both keep their own reasons.
+	if _, platform := authz.ActionFor(tool); !platform && len(installs) > 0 {
+		legs.RolePermits = authz.Permits(s.RoleNow, authz.Read)
+	}
 	writeJSON(w, http.StatusOK, authorityResponse{
 		Session:  sessionRef{ID: s.SessionID, Org: s.OrgID, ActingFor: s.ActingFor},
 		Tool:     tool,

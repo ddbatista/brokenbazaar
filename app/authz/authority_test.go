@@ -112,17 +112,17 @@ func TestToolActions(t *testing.T) {
 		"set_member_role": SetMemberRole,
 	}
 	for tool, action := range want {
-		got, ok := actionFor(tool)
+		got, ok := ActionFor(tool)
 		if !ok || got != action {
-			t.Errorf("actionFor(%q) = %q, %v; want %q", tool, got, ok, action)
+			t.Errorf("ActionFor(%q) = %q, %v; want %q", tool, got, ok, action)
 		}
 	}
 	if len(toolActions) != len(want) {
 		t.Errorf("toolActions has %d tools, the test covers %d", len(toolActions), len(want))
 	}
 	for _, tool := range []string{"", "drop_table", "READ_DOCUMENT"} {
-		if _, ok := actionFor(tool); ok {
-			t.Errorf("actionFor(%q) should not map", tool)
+		if _, ok := ActionFor(tool); ok {
+			t.Errorf("ActionFor(%q) should not map", tool)
 		}
 		s := passing()
 		s.Scope = append(s.Scope, tool)
@@ -192,7 +192,7 @@ func TestEveryPolicyToolHasAnAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tool := range data.Tools {
-		if _, ok := actionFor(tool); !ok {
+		if _, ok := ActionFor(tool); !ok {
 			t.Errorf("data.tools lists %q, which has no action in toolActions", tool)
 		}
 	}

@@ -75,6 +75,14 @@ POLICY_REASONS = frozenset({
     "egress_not_allowlisted",
     "resolved_address_denied",
     "tenant_data_egress",
+    # M4a T5: the drift leg's reason. A reason not listed here exits 2
+    # by design, so every hardened run of the new leg reads as an
+    # outage until it lands here (the same coupling the M3 reasons
+    # carried). tenant_data_egress is REUSED for the marketplace
+    # consent channel: one requirement -- tenant-derived bytes leaving
+    # without consent -- now has two paths, and they share one reason
+    # rather than minting a synonym the PoCs must learn.
+    "schema_drift_reapproval_required",
 })
 
 

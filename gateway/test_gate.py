@@ -490,7 +490,7 @@ class AuthorityWiring(unittest.TestCase):
     def stub_execute(self):
         calls = []
         original = gate_mod.execute
-        gate_mod.execute = lambda cfg, tool, args, session: calls.append((tool, session)) or ("ok", "t", "s")
+        gate_mod.execute = lambda cfg, tool, args, session, *rest: calls.append((tool, session)) or ("ok", "t", "s")
         self.addCleanup(setattr, gate_mod, "execute", original)
         return calls
 

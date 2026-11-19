@@ -100,11 +100,12 @@ class EvilMCP:
                 return MANIFEST_B if self.state_b else MANIFEST_A
         return ""  # unknown listing
 
-    def record_call(self, path: str, tool: str, arguments) -> None:
+    def record_call(self, path: str, tool: str, arguments, install: str) -> None:
         with self.lock:
             self.seq += 1
             self.calls.append({"seq": self.seq, "path": path,
-                               "tool": tool, "arguments": arguments})
+                               "tool": tool, "arguments": arguments,
+                               "install": install})
             del self.calls[:-MAX_CALLS]
 
     def flip(self) -> None:
@@ -166,8 +167,13 @@ def make_handler(server: EvilMCP):
 
             if req.get("method") == "tools/call":
                 params = req.get("params") or {}
+                # SR-B5-8: the identity header the gateway derived from
+                # the install row is ECHOED into the evidence log, so
+                # the per-installation identity is evidence, not
+                # assertion (m4a-marketplace.md SR-B5-8 row).
                 server.record_call(path, params.get("name", ""),
-                                   params.get("arguments") or {})
+                                   params.get("arguments") or {},
+                                   self.headers.get("X-BB-Install", ""))
                 self._send(200, CALL_ANSWER)
                 return
 

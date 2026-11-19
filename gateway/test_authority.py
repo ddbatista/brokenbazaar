@@ -22,6 +22,9 @@ GOOD = {
     "tool": "delete_document",
     "role_now": "viewer",
     "legs": {"within_time": True, "in_scope": True, "role_permits": False},
+    # M4a T5: every answer now carries the org's install facts; an empty
+    # array is a complete answer (the org has no installs).
+    "installs": [],
 }
 
 
@@ -54,6 +57,7 @@ class Lookup(unittest.TestCase):
             "session": {"id": "s-1", "org": "o-1", "acting_for": "u-1"},
             "role_now": "viewer",
             "legs": {"within_time": True, "in_scope": True, "role_permits": False},
+            "installs": [],
         })
 
     def test_a_denying_leg_is_a_fact_not_an_error(self):
@@ -109,6 +113,54 @@ class Lookup(unittest.TestCase):
         lookup(fake, session_id="s-1/../../tools/delete_document?x=")
         self.assertNotIn("/../", seen["path"])
         self.assertTrue(seen["path"].startswith("/internal/sessions/"))
+
+    def test_install_facts_are_carried_through_cleaned(self):
+        # M4a T5: a well-formed installs array is passed on with exactly
+        # the decided fields -- nothing more, nothing the policy did not
+        # establish.
+        install = {
+            "install_id": "11111111-2222-4333-8444-555555555555",
+            "item_id": "99999999-9999-4999-8999-999999999999",
+            "endpoint_url": "http://publisher.example/evil",
+            "endpoint_address": "172.28.0.22",
+            "pinned_digest": "0f" * 32,
+            "pinned_manifest": '{"jsonrpc":"2.0"}',
+            "tool_in_pin": True,
+            "receives_document_content": False,
+        }
+        fake, _ = answering(200, dict(GOOD, installs=[install]))
+        got, err = lookup(fake, tool="summarize_notes")
+        self.assertEqual(err, "")
+        self.assertEqual(got["installs"], [install])
+
+    def test_malformed_install_facts_fail_the_whole_answer(self):
+        # A partial answer is never passed on: an install fact that lacks
+        # a field, or carries the wrong type, makes the entire lookup an
+        # enrichment error (a stale API image that omits the field fails
+        # closed here rather than deciding on facts it did not
+        # establish).
+        bad = {
+            "install_id": "11111111-2222-4333-8444-555555555555",
+            "item_id": "99999999-9999-4999-8999-999999999999",
+            "endpoint_url": "http://publisher.example/evil",
+            "endpoint_address": "172.28.0.22",
+            "pinned_digest": "0f" * 32,
+            "pinned_manifest": '{"jsonrpc":"2.0"}',
+            "tool_in_pin": True,
+            # receives_document_content missing
+        }
+        cases = {
+            "a fact missing a boolean": dict(GOOD, installs=[bad]),
+            "a fact not an object": dict(GOOD, installs=["nope"]),
+            "installs not an array": dict(GOOD, installs="nope"),
+            "installs absent": {k: v for k, v in GOOD.items() if k != "installs"},
+        }
+        for name, body in cases.items():
+            with self.subTest(name):
+                fake, _ = answering(200, body)
+                got, err = lookup(fake, tool="summarize_notes")
+                self.assertIsNone(got)
+                self.assertNotEqual(err, "")
 
 
 if __name__ == "__main__":

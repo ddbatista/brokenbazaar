@@ -61,7 +61,7 @@ import authority as authority_mod
 import decide as decide_mod
 import mode as mode_mod
 import redact as redact_mod
-from tools import documents, fetch
+from tools import documents, fetch, mcp
 
 GATEWAY_ROOT = Path(__file__).resolve().parent
 DEFAULT_POLICY_DIR = GATEWAY_ROOT / "policy"
@@ -250,7 +250,55 @@ def enrich(tool: str, args: dict) -> tuple[dict, str]:
     }, ""
 
 
-def execute(cfg: Config, tool: str, args: dict, session: dict):
+def marketplace_facts(tool: str, authority: dict, platform_tools) -> tuple[dict, dict | None]:
+    """M4a T5: the admission and drift facts for an installed-tool call.
+
+    Returns (facts, relevant_install): the facts merge into `resolved`
+    -- tool_known and pin_verified, the two booleans the marketplace legs
+    decide on -- and the relevant install row goes to execute() when the
+    policy allows.
+
+    THE PER-CALL DRIFT CHECK (m4a-marketplace.md D3): every installed-tool
+    call re-fetches the publisher's manifest and compares the SHA-256 of
+    exactly the fetched bytes against the pin. A manifest that cannot be
+    fetched is NOT "no drift" -- pin_verified reads false, and the drift
+    reason names it (M4a-N2's trap). Nothing here decides: the facts are
+    established, the policy is the decider.
+
+    WHICH INSTALL IS RELEVANT: the one whose PIN names the tool first
+    (the org's consent), else the one whose manifest fetched TODAY names
+    it -- a name only the live manifest knows is the rug pull, and the
+    drift leg refuses it with its own reason. A name neither knows is
+    honestly unknown: tool_known false, and unknown_tool -- which
+    evaluates first -- keeps its reason too.
+    """
+    installs = authority.get("installs") or []
+    if tool in platform_tools or not installs:
+        # A platform tool rides the M2/M3 legs unchanged; an org with no
+        # installs has no marketplace channel to check.
+        return {}, None
+
+    checked = []
+    for fact in installs:
+        raw, _why = mcp.fetch_manifest(fact)
+        checked.append({
+            **fact,
+            "fetched": raw is not None,
+            "live_names": mcp.manifest_tool_names(raw) if raw is not None else [],
+            "digest_ok": raw is not None and mcp.digest_matches(fact, raw),
+        })
+
+    relevant = next((c for c in checked if c["tool_in_pin"]), None)
+    if relevant is None:
+        relevant = next((c for c in checked if tool in c["live_names"]), None)
+    if relevant is None:
+        return {"tool_known": False, "pin_verified": False}, None
+
+    return {"tool_known": True, "pin_verified": relevant["digest_ok"]}, relevant
+
+
+def execute(cfg: Config, tool: str, args: dict, session: dict,
+            install_fact: dict | None = None):
     """Run an allowed call. Returns (outcome, text, summary).
 
     Only ever reached after a durable pre-record exists. `session` is the
@@ -304,6 +352,18 @@ def execute(cfg: Config, tool: str, args: dict, session: dict):
             return "error", f"http_fetch failed: {res.reason}", res.reason
         final = res.hops[-1].url if res.hops else args.get("url", "")
         return "ok", res.body, f"{final} -> {res.status} ({len(res.body)} bytes)"
+
+    if install_fact is not None and install_fact.get("install_id"):
+        # M4a T5: an installed tool executes HERE, at the address the
+        # install row recorded, under the install's own identity -- the
+        # agent never dials a publisher in hardened mode, structurally.
+        # The policy already allowed the call, so this branch's own
+        # refusals (rebinding, range, transport) are operational, and
+        # they deny rather than execute half a decision.
+        res = mcp.call_tool(install_fact, tool, args)
+        if not res.allowed:
+            return "error", f"{tool} failed: {res.reason}", res.reason
+        return "ok", res.text, f"{tool} -> {install_fact.get('endpoint_url', '')}"
 
     return "error", f"unroutable tool {tool!r}", "unroutable"
 
@@ -367,8 +427,29 @@ def handle_gate(cfg: Config, payload: dict) -> tuple[int, dict]:
                        if authority else {})
 
     resolved = {}
+    install_fact = None
     if not enrich_err:
         resolved, enrich_err = enrich(tool, args)
+    if authority is not None and not enrich_err:
+        # M4a T5: the marketplace channel's facts, established here the
+        # way the resolved address is -- never by the caller, never by
+        # the policy. The consent facts ride `authority` (the platform
+        # computed them against the pin); the admission and drift facts
+        # ride `resolved` (the gateway fetched live itself). Platform
+        # tools carry NO install key at all: their records stay
+        # byte-identical to M3's, and a new field appears exactly when
+        # the channel it describes does.
+        platform_tools = cfg.policy_data.get("tools", ())
+        if tool not in platform_tools:
+            mkt, install_fact = marketplace_facts(
+                tool, authority, platform_tools)
+            resolved.update(mkt)
+            authority_facts["install"] = {
+                "exists": install_fact is not None,
+                "tool_in_pin": bool(install_fact and install_fact["tool_in_pin"]),
+                "receives_document_content": bool(
+                    install_fact and install_fact["receives_document_content"]),
+            }
 
     if enrich_err:
         # Enrichment failed, so no decision can be made on facts. That is
@@ -415,7 +496,7 @@ def handle_gate(cfg: Config, payload: dict) -> tuple[int, dict]:
         }
 
     start = time.monotonic()
-    outcome, text, summary = execute(cfg, tool, args, session)
+    outcome, text, summary = execute(cfg, tool, args, session, install_fact)
     duration_ms = int((time.monotonic() - start) * 1000)
 
     try:

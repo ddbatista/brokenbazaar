@@ -69,6 +69,61 @@ const (
 	docA     = "20000000-0000-4000-8000-000000000001"
 )
 
+// TestAuthorityDerivesReadForInstalledTools (M4a T5): a non-platform tool
+// name rides the role leg as Read once the org has an active install --
+// http_fetch's precedent -- while a platform name keeps its mapped action
+// and a garbage name with NO installs still fails the role leg.
+func TestAuthorityDerivesReadForInstalledTools(t *testing.T) {
+	pin := `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"summarize_notes","description":"clean","receives":["user_text"]}]}}`
+	it, _ := fakeInternalTools()
+	it.installsFor = func(string) installLister {
+		return fakeInstalls{{
+			ID: "11111111-2222-4333-8444-555555555555", ItemID: "99999999-9999-4999-8999-999999999999",
+			EndpointURL: "http://publisher.example/evil", EndpointAddress: "172.28.0.22",
+			PinnedManifest: pin, PinnedDigest: store.ManifestDigest([]byte(pin)),
+		}}
+	}
+	var legsOf = func(tool string) authz.Legs {
+		rec := serve(it.authority, http.MethodGet,
+			"/internal/sessions/"+sAdmin+"/authority?tool="+tool, "",
+			map[string]string{"session_id": sAdmin})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("authority(%s) = %d", tool, rec.Code)
+		}
+		var resp struct {
+			Legs authz.Legs `json:"legs"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		return resp.Legs
+	}
+	if got := legsOf("summarize_notes"); !got.RolePermits {
+		t.Fatalf("installed name role leg = false, want Read-derived true")
+	}
+	if got := legsOf("read_document"); !got.RolePermits {
+		t.Fatalf("platform name role leg changed: read_document")
+	}
+}
+
+// TestAuthorityGarbageNameStillFailsRole: the Read derivation requires an
+// install; with none, a garbage name keeps the honest failing leg.
+func TestAuthorityGarbageNameStillFailsRole(t *testing.T) {
+	it, _ := fakeInternalTools()
+	rec := serve(it.authority, http.MethodGet,
+		"/internal/sessions/"+sAdmin+"/authority?tool=no_such_tool", "",
+		map[string]string{"session_id": sAdmin})
+	var resp struct {
+		Legs authz.Legs `json:"legs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if resp.Legs.RolePermits {
+		t.Fatalf("garbage name role leg = true with no installs")
+	}
+}
+
 func fakeInternalTools() (*internalTools, *fakeDocs) {
 	all := []string{"read_document", "update_document", "delete_document", "http_fetch"}
 	sessions := fakeSessions{

@@ -31,6 +31,19 @@ from tools import documents
 
 LEGS = ("within_time", "in_scope", "role_permits")
 
+# M4a T5: the install facts the authority route now carries with every
+# answer -- the org's active installs, pin-computed on the API side by
+# the same parser that validated them at install. The gateway fetches
+# live itself and compares digests; these fields are the platform-owned
+# half of the decision (SR-B5-1: state the reviewed party cannot
+# influence). A missing or malformed installs field makes the WHOLE
+# answer unusable: a partial answer is never passed on, and a stale API
+# image that omits the field fails closed here rather than deciding on
+# facts it did not establish.
+INSTALL_FIELDS = ("install_id", "item_id", "endpoint_url", "endpoint_address",
+                  "pinned_digest", "pinned_manifest")
+INSTALL_BOOLS = ("tool_in_pin", "receives_document_content")
+
 
 def lookup(session_id: str, tool: str, *, api_base: str, tools_secret: str,
            request=None, timeout: float = 5.0) -> tuple[dict | None, str]:
@@ -73,9 +86,26 @@ def lookup(session_id: str, tool: str, *, api_base: str, tools_secret: str,
         if not isinstance(legs.get(leg), bool):
             return None, f"authority answer lacks a boolean {leg}"
 
+    installs = body.get("installs")
+    if not isinstance(installs, list):
+        return None, "authority answer lacks an installs array"
+    clean_installs = []
+    for ins in installs:
+        if not isinstance(ins, dict):
+            return None, "authority answer's installs array holds a non-object"
+        for field in INSTALL_FIELDS:
+            if not isinstance(ins.get(field), str):
+                return None, f"install fact lacks a string {field}"
+        for field in INSTALL_BOOLS:
+            if not isinstance(ins.get(field), bool):
+                return None, f"install fact lacks a boolean {field}"
+        clean_installs.append({field: ins[field]
+                               for field in INSTALL_FIELDS + INSTALL_BOOLS})
+
     return {
         "session": {"id": session["id"], "org": session["org"],
                     "acting_for": session["acting_for"]},
         "role_now": body.get("role_now", ""),
         "legs": {leg: legs[leg] for leg in LEGS},
+        "installs": clean_installs,
     }, ""
