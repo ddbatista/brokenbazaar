@@ -12,7 +12,7 @@
     "exit_code": 0,
     "stdout_contains": [
       "07 VULNERABLE: the poisoned description steered summarize_notes",
-      "second org"
+      "one listing, two orgs"
     ]
   },
   "hardened": {

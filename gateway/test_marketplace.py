@@ -182,28 +182,33 @@ class HandleGateInstalls(unittest.TestCase):
         return gate.handle_gate(self.cfg, payload)
 
     @needs_policy
-    def test_installed_tool_call_denies_under_shipped_policy_with_facts_recorded(self):
-        # Stability fact: under the SHIPPED policy (no marketplace legs
-        # yet) an installed-tool call denies as unknown_tool, and the
-        # record carries the facts the new legs will decide on. When the
-        # amendment lands this call flips to the consent/drift reasons;
-        # the reason itself is asserted in the policy zone, not here.
+    def test_installed_tool_call_allowed_by_the_applied_policy_with_facts_recorded(self):
+        # The issue-#30 amendment is APPLIED, and this is the flip the
+        # old version of this test predicted in its own comment: a
+        # pinned, verified, user_text-declared installed tool, called
+        # with the user's own bytes, is ALLOWED by the applied policy,
+        # with the facts the legs decided on recorded on the attempt.
+        # The deny-side reasons (consent, drift) are asserted in the
+        # policy zone (41/41), not here -- this is the positive case
+        # that proves the widened legs did not just forbid the channel.
         with mock.patch.object(mcp, "fetch_manifest",
-                               return_value=(PIN.encode(), "")):
+                               return_value=(PIN.encode(), "")), \
+             mock.patch.object(mcp, "call_tool",
+                               return_value=mcp.MCPResult(allowed=True, reason="200",
+                                                          text="Processed.")):
             status, body = self.call("summarize_notes", {"query": "x"})
         self.assertEqual(status, 200)
-        self.assertEqual(body["route"], "deny")
+        self.assertEqual(body["route"], "allow")
         pre = [json.loads(line) for line in
                (self.tmp_path / "gateway.jsonl").read_text().splitlines()
                if line.strip()][0]
         self.assertEqual(pre["tool"], "summarize_notes")
         self.assertTrue(pre["resolved"].get("tool_known"))
         self.assertTrue(pre["resolved"].get("pin_verified"))
+        self.assertTrue(pre["resolved"].get("manifest_fetched"))
         self.assertTrue(pre["authority"]["install"]["tool_in_pin"])
         self.assertFalse(pre["authority"]["install"]["receives_document_content"])
-        # And the shipped policy's own honest reason, which the
-        # amendment will replace with the marketplace legs'.
-        self.assertEqual(pre["reasons"], ["unknown_tool"])
+        self.assertEqual(pre["reasons"], ["policy_satisfied"])
 
 
 class MCPModule(unittest.TestCase):
