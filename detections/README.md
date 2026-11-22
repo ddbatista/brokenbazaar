@@ -136,3 +136,27 @@ So the lesson is M1's again, in a new place: **the fact detection needs is one t
 - **R5 sees changes made through the product.** The agent's database credential can write `role_changes` and `memberships` directly (R-M3-2). A change by direct SQL is invisible, and a green matrix does not claim it.
 - **R6's at-execution leg is unit-tested, not replayed.** It needs a demotion inside the gate-to-write window, which a replay cannot land deterministically (M2 T8 treated its mid-request window the same way). A refusal whose pre-record is outside the window still alerts, on its decision id.
 - **A write that copies text from a document the session read** (M3-N6, R-M3-4) is a recorded detection shape, not built.
+
+## M4a — the marketplace: consent artifacts joined to events (`marketplace_rules.py`, `replay_marketplace.py`)
+
+M2's rules read the agent's inputs; M3's read delegated relations. M4a's surface adds a third-party whose CONSENT ARTIFACT already exists in the platform's own records: the install row's pinned manifest, in bytes. The rules join events to that artifact — and fire on the attempt, in either writer's schema, whether or not anything stopped the call.
+
+- **D1 `first-seen-tool`** — an installed-tool call whose name is in no ACTIVE pin the org holds. The (tool → endpoint) pair was never approved: whatever endpoint would serve it, the org never consented. Catches the rug pull at call time, in both modes — in hardened the attempt is denied, but the attempt is the event; a detector keyed on "what executed" is coupled to the control working (M1's lesson, one surface up).
+- **D2 `consent-mismatch`** — bytes the user did not type (`provenance.derived_from` outside `{"user"}`), to a tool whose pin declares only `user_text`. The consent artifact is the pin's `receives`; the byte-provenance is the platform's own label — a platform fact, not a regex on text, M2-N2's ruling applied one surface up. `document_content` is the pin vocabulary's only declared non-user class and covers exactly those bytes, so the re-approved tool generates no alert: the org decided, and the rule does not overrule it. Catches 07 in vulnerable mode from `agent.jsonl`, where no gate record exists.
+- **D3 `installed-listing-mutated`** — a catalog mutation row for a listing with an ACTIVE install: the page changed under a live decision. Not a second drift check (the gateway compares digests at call time); this is the operator's visibility that the catalog moved under installs, and it is the one attack cell the deny-only baseline cannot see in EITHER mode.
+
+## M4a — what the matrix measures
+
+**Both modes: the pin-reading rules caught 3/3 attacks (07's steered call, 08's rug-pulled call, 08's catalog PATCH); the deny-only baseline caught 0/3 in vulnerable mode and 2/3 in hardened** — it is coupled to the control working, and even in hardened it is blind to the mutation, which is not a gate event. The lesson is M1's, measured on a third surface.
+
+- **`07 typed control` does not exist in vulnerable mode, and the replay says so instead of skipping quietly.** The naive grammar's imperative fires only after a read, and its query is then the READ's bytes — a typed installed-tool call exists only on the agent's own wire, the gate's channel. The row is driven there as a control (the attacks/README M4a amendment) and is printed as SKIP in vulnerable mode with the reason.
+- **The re-approved row fires D2, on purpose.** The org re-approved the archive tool; the summarize_notes that still declares `user_text` and still steers on the read keeps firing — re-approval does not launder the pin, tool by tool. A matrix that expected silence there would be asserting a decision the org did not make.
+- **The rug-pull window holds two calls and both rules fire.** The shared MANIFEST_A carries 07's poison, so a read-driven export_archive ask also steers `summarize_notes`. The replay asserts what the rules should see, not a curated subset.
+
+**Declared couplings and limits:**
+
+- **D2's honest limit is the assembler's.** In vulnerable mode, content merged into the stored transcript BEFORE the run loses its label (R1's precedent): a call derived from yesterday's transcript is invisible. Content read during the run is labelled in both modes — the 07 path.
+- **D2 trusts the pin's declaration.** A publisher declaring `document_content` up front harvests within consent and no leg fires (M4a-N1). No detector reads intent; the install review is load-bearing. This rule catches the lie after approval, and the re-approved row proves it does not overrule the org's fresh decision.
+- **D1's platform registry is mirrored** from `app/agent/executor_vulnerable.go` (`naiveAllowedTools`): a platform tool added to the Go registry must join `PLATFORM_TOOLS` in the same task, the way agent_rules pins the fetcher's summary format.
+- **The pins are read at window-collection time** (`/orgs/{id}/installs`): a listing installed mid-window is judged by the rows the replay reads. The exploit harness asserts digests before every run; a wrong pin is operational, never a clean setup.
+- **Known CI coupling, stated loudly:** until issue #30's policy amendment is applied, the hardened marketplace cells run against the SHIPPED policy, whose legs do not know installs — the typed control denies as `unknown_tool` there, so `make detect`'s hardened replay and `test_policy_reasons_match_the_policy` both carry the handover's red on the `m4a` branch. Both go green the moment the zone lands; that is the fail-closed direction the design chose.

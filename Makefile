@@ -183,13 +183,14 @@ attack: ## Run the full attack suite in both modes
 	@echo ""
 	@echo "attack suite: both modes behaved as their mode demands"
 
-detect: ## Replay PoCs and measure detect vs. miss (both modes; M1 API rule + M2 agent rules + M3 delegation rules)
+detect: ## Replay PoCs and measure detect vs. miss (both modes; M1 API rule + M2 agent rules + M3 delegation rules + M4a marketplace rules)
 	@echo "== VULNERABLE mode: detection replay =="
 	$(VULNERABLE_ENV) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory wait
 	python3 detections/replay.py --base-url $(BASE_URL)
 	python3 detections/replay_agent.py --base-url $(BASE_URL)
 	python3 detections/replay_delegation.py --base-url $(BASE_URL)
+	python3 detections/replay_marketplace.py --base-url $(BASE_URL)
 	@echo ""
 	@echo "== HARDENED mode: detection replay (needs JWT_SECRET and TOOLS_SECRET) =="
 	@$(MAKE) --no-print-directory require-hardened-secrets
@@ -198,10 +199,11 @@ detect: ## Replay PoCs and measure detect vs. miss (both modes; M1 API rule + M2
 	python3 detections/replay.py --hardened --base-url $(BASE_URL)
 	python3 detections/replay_agent.py --hardened --base-url $(BASE_URL)
 	python3 detections/replay_delegation.py --hardened --base-url $(BASE_URL)
+	python3 detections/replay_marketplace.py --hardened --base-url $(BASE_URL)
 	@echo ""
 	@echo "detection replay: both modes matched expectations"
 
-test-detections: ## Run the detection-rule and replay-judge tests (stdlib unittest, no stack)  (M1 T8, M2 T9, M3 T10)
+test-detections: ## Run the detection-rule and replay-judge tests (stdlib unittest, no stack)  (M1 T8, M2 T9, M3 T10, M4a T8)
 	python3 -m unittest discover -s detections -t detections -p 'test_*.py' -v
 
 EXP ?= 03-injection-compliance
