@@ -16,6 +16,8 @@ Tags are pinned to a framework version, because the young projects (MCP, AST) ar
 | 04 | ssrf metadata | B5, B7 | M2 | **LLM06:2025** Excessive Agency · **ASI02 2026** Tool Misuse and Exploitation · **MCP05:2025** · **A10:2021** Server-Side Request Forgery |
 | 05 | confused deputy | B3, B5 | M3 | **LLM06:2025** Excessive Agency · **ASI03 2026** Identity and Privilege Abuse · **A01:2021** Broken Access Control. No LLM01: nothing is injected; the user asks in their own words. |
 | 06 | policy plane | B3, B8 | M3 | **LLM01:2025** Prompt Injection (the vector) · **LLM06:2025** Excessive Agency · **ASI01 2026** Agent Goal Hijack · **ASI03 2026** Identity and Privilege Abuse · **A01:2021** Broken Access Control |
+| 07 | tool poisoning | B6 | M4a | **LLM01:2025** Prompt Injection (the vector) · **LLM06:2025** Excessive Agency · **ASI02 2026** Tool Poisoning · **ASI05 2026** Supply-Chain Compromise · **A08:2021** Software and Data Integrity Failures |
+| 08 | rug pull | B6 | M4a | **LLM06:2025** Excessive Agency · **LLM08:2025** Vector and Sandbagging (the platform's supply chain, read as its agent-tool half) · **ASI03 2026** Identity and Privilege Abuse · **ASI05 2026** Supply-Chain Compromise · **A08:2021** Software and Data Integrity Failures |
 
 03 and 04 carry agent-era tags because the agent is the mechanism: the planted bug is the agent executing its tools with no gate. 05 and 06 carry an agent-era tag for the same reason: the same request through the direct API is refused in both builds. They also carry A01, because what fails is authorization.
 
@@ -55,7 +57,22 @@ Silent gaps read as ignorance; declared gaps read as judgment. Nothing below is 
 | **A session widening its own scope** | Unreachable: no scope-change tool or route exists, and `sessions.scope` has no update path. | SR-B3-6, plan M3 D8 |
 | **Membership removal** | No removal path exists, and the obvious one (`ON DELETE CASCADE`) would erase the agent's transcript. Declared so the first module that builds it starts from the trap. | R-M3-5, M3-N3 |
 
-The M4-era entries — MCP09 Shadow MCP Servers, AST06 Weak Isolation, AST10 Cross-Platform Reuse, AST02 registry-level compromise — land with M4, where the marketplace exists to make them meaningful or explicitly declined.
+**M4a — marketplace (findings 07, 08):**
+
+| Not covered | Why | Carried by |
+|---|---|---|
+| **Rate and volume limits on installed-tool calls** | Declared, not deferred twice. M3's "→ M4a" was a guess; no volume path exists for a marketplace call (one call per steering event is the finding's own shape, and a cap would have answered the *call*, which the consent and drift legs already do better). A guessed deferral is not passed forward — SR-B4-6's precedent. | SR-B5-7, m4a-marketplace.md D10 |
+| **A publisher honest within its pinned bytes** | Drift is *change*; 07's poison served forever never drifts. Within the consent vocabulary the org approved, harvest is a decision the org made — no leg reads intent, and no leg pretends to. The install review is load-bearing; the platform's job is binding the reviewed bytes and making their violation visible (D2), not guessing the publisher's meaning. | M4a-N1 (m4a-marketplace.md §4) |
+| **B6 leaf 3.1 — an unbounded fetch from an installed tool** | Reachable-vulnerable, no finding: closed by install-time classification + pinned-address dialing, so the leaf's risk ended before a PoC existed. The diff records it as closed-by-design rather than mining a non-finding. | m4a-marketplace.md D10, §3 |
+| **B6 leaf 3.2 — response caps on publisher dials** | Ships as hygiene in both modes (the gateway's own fetch caps apply to the drift check's dials); not claimed as a requirement — a quiet partial fix is stated as hygiene, per the disposition rule. | m4a-marketplace.md D10, §3 |
+| **B6 leaf 1.3 — publisher impersonation by name** | Unreachable: publishers and listings are uuid handles with no name directory, so no collision target exists. | m4a-marketplace.md D10 |
+| **B6 leaf 4.1 — one listing exfiltrating from many orgs** | Not declined — **delivered** as 07's blast-radius beat (two orgs, one listing, both orgs' bytes at the same publisher, both refused in hardened). Listed here because "blast radius" is a coverage axis the findings table cannot show. | 07's exploit, §7 |
+| **A compromised API as the poison channel** | The hardened agent's catalog is platform-served: pins come from the API, so a compromised API re-serves pins the org never approved. Below the module's ceiling (the agent has no independent pin source), declared rather than half-answered. | M4a-N3 (m4a-marketplace.md §4) |
+| **D2's pre-run-transcript blind spot in vulnerable mode** | Content merged into the stored transcript before the run carries no label in the naive build (R1's precedent); a call derived from yesterday's transcript is invisible to the consent rule in vulnerable mode. Content read during the run is labelled in both modes — the 07 path. | detections/README.md (M4a) |
+| **Per-argument provenance on marketplace calls** | The consent channel judges the call's derived-from set; argument-level classes sharpen it and are M4b's (M3-N4's line, with M4a-N4's consumer now real). | R-M3-3 → M4a-N4 |
+| **The agent's database credential writing grant-shaped state** | The DB-role split (R-M3-2) remains open — M4a added `installs` as tenant data the credential can write, but the split is a compose+migrations change, a later module's. | R-M4a-5 (m4a-marketplace.md §4) |
+
+The M4b-era entries — the skill frontmatter variant (SR-B9-14's row is its citation), cross-platform skill reuse, registry-level compromise — land with M4b.
 
 ## Corrections log — when a diff corrected the baseline
 

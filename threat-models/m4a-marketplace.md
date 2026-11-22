@@ -480,3 +480,26 @@ crashed run cannot leave a poisoned manifest for the next.
   SR-B9-14 row is its citation); install-consent vocabulary reused by skill declared
   capabilities (the plan's M4b "intersected, never unioned" line now has a working
   precedent in `installs`); the db-role split (R-M3-2 → R-M4a-4/5).
+
+---
+
+## 9. At module close (2026-11-22)
+
+Appended at T9. §1 to §8 are the record as of T1 and are not edited. This section says what became of §8's follow-ups, and what M4a hands on.
+
+**Closed by M4a:**
+- **The README's M2-D2 line** was amended in the diff's own commit (`6118594`), pointing at D9's disposition; the dated `m2-agent-gateway.md` was never touched.
+- **`POLICY_REASONS` gained `schema_drift_reapproval_required`** with the mediation half (`867cfcd`), and a test pins the set to the policy's legs.
+- **The two hardened zones were applied by hand and verified canonically:** the compose amendment (evil-mcp service, `publisher.example` hosts, api `extra_hosts`) as `6417ed9` via issue #29, and the policy amendment (drift leg, pin grant, consent channel) as `b441372` via issue #30. Both closed with the canonical-run evidence.
+- **The fixture-unreachable fault (M4a-N2)** shipped as F4: the gateway's `/etc/hosts` rewritten so the publisher answers a dead address while the fixture stays up for the exploit's own channel — every marketplace exploit exits 2 naming the unfetched manifest, never reading the fail-closed deny as a held control. The record carries `manifest_fetched` so the run's judgment can tell an outage from a held control.
+- **The detection shapes shipped** (`detections/marketplace_rules.py`, measured in both modes by `make detect`): the first-seen tool against the pinned set (D1), the consent-vs-provenance mismatch (D2 — catches 07 in vulnerable mode from `agent.jsonl`), the catalog-mutation visibility (D3 — the one attack cell a denial-based detector cannot see in either mode).
+- **SR-B5-7's declaration** landed in `coverage/README.md` as declared non-coverage, with D10's paragraph as its reason — a guessed deferral is not passed forward twice.
+- **T2's absences stayed stated as decisions:** no `org_grants` change, no `current`-pointer semantics, no install-widening path — a widened consent is a new install row, and re-approval ships exactly that way.
+- **Two bugs the module's own gates caught live**, both recorded at T7: the nil-slice (an org with zero installs marshalled as JSON `null`, which the gateway's strict validation rightly refused — every hardened call in a freshly seeded org died as enrichment_failed until the route answered an empty array), and the no-op fault (a format-coupled sed that silently matched nothing — CONTROL HOLDS under an applied fault, caught by the faults judge, replaced by a total rewrite).
+
+**Carried, with an address:**
+- **Argument-level taint → M4b** (M3-N4; M4a-N4's consumer is now real — the consent channel judges the call's derived-from set and would sharpen to argument classes).
+- **The skill frontmatter-description variant → M4b** (SR-B9-14's row is the citation; `installs` is the working precedent for "intersected, never unioned" consent vocabularies).
+- **The db-role split** (R-M3-2 → M4a-N5): the agent's credential can now write `installs` too; still a compose+migrations change, a later module's.
+- **A8.4's rewording** joins the `v1` spec queue: the manifest's declaration is the contract object (D9, §5).
+- **The window between two calls of a drift check** and **per-install-differentiated manifest serving** are declared in `defenses/what-the-org-reviewed-is-what-runs.md` — verified limits, not silent gaps.
