@@ -13,9 +13,9 @@ import (
 // made the same assumption.
 func TestEveryRoleActionCell(t *testing.T) {
 	want := map[store.Role]map[Action]bool{
-		store.RoleViewer: {Read: true, Create: false, Update: false, Delete: false, SetMemberRole: false},
-		store.RoleMember: {Read: true, Create: true, Update: true, Delete: false, SetMemberRole: false},
-		store.RoleAdmin:  {Read: true, Create: true, Update: true, Delete: true, SetMemberRole: true},
+		store.RoleViewer: {Read: true, Create: false, Update: false, Delete: false, SetMemberRole: false, InstallTool: false},
+		store.RoleMember: {Read: true, Create: true, Update: true, Delete: false, SetMemberRole: false, InstallTool: false},
+		store.RoleAdmin:  {Read: true, Create: true, Update: true, Delete: true, SetMemberRole: true, InstallTool: true},
 	}
 	for role, row := range want {
 		for action, allowed := range row {
@@ -31,7 +31,7 @@ func TestEveryRoleActionCell(t *testing.T) {
 // otherwise be untested, and so would one granted in a row but missing
 // from the action list.
 func TestTheTableHoldsOnlyTestedRolesAndActions(t *testing.T) {
-	known := map[Action]bool{Read: true, Create: true, Update: true, Delete: true, SetMemberRole: true}
+	known := map[Action]bool{Read: true, Create: true, Update: true, Delete: true, SetMemberRole: true, InstallTool: true}
 	if len(actions) != len(known) {
 		t.Fatalf("actions has %d entries, the test covers %d: add the new action's cells to TestEveryRoleActionCell", len(actions), len(known))
 	}

@@ -47,9 +47,12 @@ var toolActions = map[string]Action{
 	"set_member_role": SetMemberRole,
 }
 
-// actionFor returns the action a tool performs, and false for a tool the
-// map does not name.
-func actionFor(tool string) (Action, bool) {
+// ActionFor returns the action a tool performs, and false for a tool the
+// map does not name. Exported since M4a T5: the authority route asks
+// whether a tool name is a PLATFORM name before deciding whether the
+// org's installs carry it instead (marketplace names are dynamic; the
+// map cannot hold them).
+func ActionFor(tool string) (Action, bool) {
 	a, ok := toolActions[tool]
 	return a, ok
 }
@@ -65,7 +68,7 @@ func Derive(s store.SessionAuthority, tool string, now time.Time) Legs {
 		WithinTime: now.Before(s.ExpiresAt),
 		InScope:    slices.Contains(s.Scope, tool),
 	}
-	if action, ok := actionFor(tool); ok {
+	if action, ok := ActionFor(tool); ok {
 		legs.RolePermits = Permits(s.RoleNow, action)
 	}
 	return legs

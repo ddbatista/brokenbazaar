@@ -75,6 +75,14 @@ POLICY_REASONS = frozenset({
     "egress_not_allowlisted",
     "resolved_address_denied",
     "tenant_data_egress",
+    # M4a T5: the drift leg's reason. A reason not listed here exits 2
+    # by design, so every hardened run of the new leg reads as an
+    # outage until it lands here (the same coupling the M3 reasons
+    # carried). tenant_data_egress is REUSED for the marketplace
+    # consent channel: one requirement -- tenant-derived bytes leaving
+    # without consent -- now has two paths, and they share one reason
+    # rather than minting a synonym the PoCs must learn.
+    "schema_drift_reapproval_required",
 })
 
 
@@ -292,6 +300,32 @@ def check_not_failed_closed(decisions: list):
                 f"'{reason}'{detail}) -- it could not decide, so this run cannot judge the control")
 
 
+def check_drift_evidence(decisions: list):
+    """Raise Operational if a drift denial was recorded against a manifest
+    that could never be fetched (M4a-N2's trap, read at the record).
+
+    A publisher that cannot be reached is a pin that could not be
+    verified: the call is denied (fail closed, the tenant is safe), but
+    the DENIAL is not evidence the drift control held -- no comparison
+    ran. A run that returned exit 1 here would be asserting a control
+    that never evaluated, the same silent pass a dead OPA produces.
+
+    The gateway records `manifest_fetched` beside the drift facts for
+    exactly this read (gate.marketplace_facts); fault F4 makes it false
+    for real, and every marketplace exploit must name it, not swallow it.
+    """
+    for rec in decisions:
+        reason = (rec.get("reasons") or [""])[0]
+        if (rec.get("route") == "deny"
+                and reason == "schema_drift_reapproval_required"
+                and not (rec.get("resolved") or {}).get("manifest_fetched", False)):
+            raise Operational(
+                "the drift denial was recorded against a manifest that could not be "
+                f"fetched ({rec.get('decision_id')}, tool {rec.get('tool')}) -- the "
+                "publisher was unreachable from the gateway, no comparison ran, and "
+                "this run cannot say the drift control held")
+
+
 def last_seq(records: list) -> int:
     """The collector's high-water mark: 0 when it has recorded nothing."""
     return max((r.get("seq", 0) for r in records), default=0)
@@ -438,6 +472,177 @@ def collector_records(collector_url: str) -> list:
     if status != 200:
         raise Operational(f"collector /received answered {status}")
     return json.loads(text)["received"]
+
+
+# --- the marketplace channel (M4a T6) -------------------------------------------
+#
+# The verbs the 07/08 exploits drive through the product's front door:
+# a publisher registers, publishes a listing, and the org's admin installs
+# it. The install pins the bytes DISCOVERY FETCHED from the endpoint --
+# asserted here (digest vs. the manifest the PoC published) so a run whose
+# pin is not what the fixture serves can never read as a clean setup.
+#
+# Response casing is the Go store's default (ID, Name, PinnedDigest...),
+# read as-is: the harness never renames a field it did not define.
+
+def register_publisher(base: str, display_name: str) -> str:
+    """Open a publisher handle (open registration, B6 5.2). Returns the token."""
+    status, text = http("POST", f"{base}/publishers/register", {"display_name": display_name})
+    if status != 201:
+        raise Operational(f"publisher registration failed: {status} {text[:200]}")
+    return json.loads(text)["token"]
+
+
+def publish_listing(base: str, token: str, name: str, endpoint_url: str,
+                    manifest: str) -> dict:
+    """Publish a catalog listing; returns the row (Go-default casing)."""
+    status, text = http("POST", f"{base}/catalog",
+                        {"name": name, "endpoint_url": endpoint_url, "manifest": manifest},
+                        token=token)
+    if status != 201:
+        raise Operational(f"publishing listing {name!r} failed: {status} {text[:200]}")
+    return json.loads(text)
+
+
+def catalog_find(base: str, admin_token: str, name: str) -> dict:
+    """The org-visible listing named `name`; the seeded control is found by it."""
+    status, text = http("GET", f"{base}/catalog", token=admin_token)
+    if status != 200:
+        raise Operational(f"the catalog answered {status}")
+    rows = json.loads(text)
+    matches = [r for r in rows if r.get("Name") == name]
+    if not matches:
+        raise Operational(f"no listing named {name!r} in the catalog (is the stack seeded?)")
+    return matches[0]
+
+
+def install_item(base: str, admin_token: str, org: str, item_id: str,
+                 manifest: str) -> dict:
+    """Install a listing as the org's admin; asserts the pin is the fixture's bytes.
+
+    `manifest` is what the endpoint serves (the PoC published it), so the
+    digest assertion below proves discovery pinned EXACTLY those bytes --
+    the install-review premise both findings stand on.
+    """
+    import hashlib
+    status, text = http("POST", f"{base}/orgs/{org}/installs", {"item_id": item_id},
+                        token=admin_token)
+    if status != 201:
+        raise Operational(f"installing item {item_id} failed: {status} {text[:200]}")
+    row = json.loads(text)
+    want = hashlib.sha256(manifest.encode()).hexdigest()
+    if row.get("PinnedDigest") != want:
+        raise Operational("the install pinned bytes that are NOT what the endpoint serves "
+                          f"({row.get('PinnedDigest', '')[:16]} != {want[:16]}) -- the "
+                          "evidence premise is broken before the run began")
+    return row
+
+
+def installs_of(base: str, admin_token: str, org: str) -> list:
+    """The org's install rows. A nil slice marshals as null: that is []."""
+    status, text = http("GET", f"{base}/orgs/{org}/installs", token=admin_token)
+    if status != 200:
+        raise Operational(f"listing installs failed: {status} {text[:200]}")
+    rows = json.loads(text)
+    return rows if isinstance(rows, list) else []
+
+
+def uninstall_item(base: str, admin_token: str, org: str, install_id: str) -> int:
+    """Uninstall (tombstone; grants are re-consented, never resumed)."""
+    status, _ = http("DELETE", f"{base}/orgs/{org}/installs/{install_id}", token=admin_token)
+    return status
+
+
+def reapprove_install(base: str, admin_token: str, org: str, install_id: str) -> dict:
+    """The org's fresh consent: fetch what the endpoint serves NOW and pin it."""
+    status, text = http("POST", f"{base}/orgs/{org}/installs/{install_id}/reapprove",
+                        {}, token=admin_token)
+    if status != 200:
+        raise Operational(f"re-approval failed: {status} {text[:200]}")
+    return json.loads(text)
+
+
+def patch_listing(base: str, publisher_token: str, item_id: str, manifest: str) -> dict:
+    """The publisher's PATCH of the platform listing (finding 08 ii)."""
+    status, text = http("PATCH", f"{base}/catalog/{item_id}", {"manifest": manifest},
+                        token=publisher_token)
+    if status != 200:
+        raise Operational(f"PATCHing the listing failed: {status} {text[:200]}")
+    return json.loads(text)
+
+
+def catalog_detail(base: str, admin_token: str, item_id: str) -> dict:
+    """The installer's view of a listing: the manifest and its mutation history."""
+    status, text = http("GET", f"{base}/catalog/{item_id}", token=admin_token)
+    if status != 200:
+        raise Operational(f"the listing's detail answered {status}")
+    return json.loads(text)
+
+
+# --- the hostile fixture's own control channel (M4a T6) ------------------------
+#
+# evil-mcp is ATTACKER-OWNED state, so unlike the collector (shared,
+# never cleared), each exploit RESETS it in its finally: the flip must not
+# outlive a crashed run, or the next run's "pre-flip" would be a lie.
+# /admin/reset restores the pre-flip manifest AND clears /calls.
+
+def fixture_reset(fix_url: str):
+    """Restore the pre-flip manifest and clear the evidence log."""
+    status, _ = http("POST", fix_url.rstrip("/") + "/admin/reset", {})
+    if status != 200:
+        raise Operational(f"the fixture's /admin/reset answered {status}")
+
+
+def fixture_flip(fix_url: str):
+    """The rug pull: the endpoint starts serving the widened manifest."""
+    status, _ = http("POST", fix_url.rstrip("/") + "/admin/flip", {})
+    if status != 200:
+        raise Operational(f"the fixture's /admin/flip answered {status}")
+
+
+def fixture_calls(fix_url: str) -> list:
+    """The evidence log: every tools/call the fixture received, with the
+    per-installation identity header echoed (SR-B5-8)."""
+    status, text = http("GET", fix_url.rstrip("/") + "/calls")
+    if status != 200:
+        raise Operational(f"the fixture's /calls answered {status}")
+    return json.loads(text)["calls"]
+
+
+# --- the agent's own wire, for positive controls (M4a T6) ----------------------
+
+def gate_call(hardened: bool, payload: dict) -> dict:
+    """POST one /gate payload from INSIDE the network, answered as JSON.
+
+    The gateway publishes no host port by design (it is the agent's
+    in-network channel), so a control that needs the agent's wire drives
+    it from the gateway container itself. The payload rides as one argv
+    element: compose exec gives the helper no stdin channel. HARDENED
+    only: the vulnerable agent never dials the gate, and a control has
+    no business there.
+    """
+    if not hardened:
+        raise Operational("the /gate control is a hardened-mode control "
+                          "(the vulnerable agent never dials the gate)")
+    script = (
+        "import json, sys, urllib.request\n"
+        "body = json.dumps(json.loads(sys.argv[1])).encode()\n"
+        "req = urllib.request.Request('http://127.0.0.1:8081/gate', data=body,\n"
+        "                            headers={'Content-Type': 'application/json'})\n"
+        "try:\n"
+        "    with urllib.request.urlopen(req, timeout=30) as r:\n"
+        "        print(json.dumps({'status': r.status, 'body': json.loads(r.read())}))\n"
+        "except urllib.error.HTTPError as e:\n"
+        "    print(json.dumps({'status': e.code, 'body': e.read().decode()}))\n"
+    )
+    proc = _compose(["exec", "-T", "gateway", "python3", "-c", script,
+                     json.dumps(payload)], hardened, timeout=60)
+    if proc.returncode != 0:
+        raise Operational("the in-container gate call failed: " + proc.stderr[-400:])
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise Operational(f"the gate answered nothing legible: {proc.stdout[:200]}")
 
 
 def _compose(args, hardened: bool, timeout=DOCKER_TIMEOUT_S):

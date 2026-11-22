@@ -10,8 +10,17 @@
 #
 # EVALUATION ORDER IS THE DESIGN, not a detail (D6, D5.3; M3 T6 D5):
 #
-#     tool known -> delegable -> time -> session scope -> org grant
-#                -> role -> allowlist -> range -> provenance -> default deny
+#     tool known -> delegable -> time -> session scope -> drift
+#                -> org grant -> role -> allowlist -> range -> provenance
+#                -> default deny
+#
+# M4a T5 adds the drift leg and widens three, in the positions the
+# module's diff fixed (m4a-marketplace.md D3/D6): installed-tool calls
+# are a SECOND CHANNEL onto legs 1, 5 and 9, and the drift leg sits
+# between role and the egress legs so it is masked by nothing ordinary
+# and masks nothing else -- a rug-pulled name must die as drift, not as
+# a scope or role artifact, and a clean session must still reach the
+# consent leg that 07 asserts on.
 #
 # The authority legs come before the egress legs, and each finding still
 # gets its own reason, because each PoC's session requests the scope its
@@ -99,9 +108,23 @@ org := object.get(input, ["session", "org"], "")
 
 derived_from := object.get(input, ["provenance", "derived_from"], [])
 
-# Leg 1 -- the tool exists at all.
+# M4a T5: the platform-owned consent facts for an installed tool --
+# computed Go-side against the PIN (the authority route), never from
+# anything the publisher serves now. Total, like every lookup above: an
+# absent install is one that does not exist, and every defaulted field
+# reads as the fail-closed direction (no pin, no consent).
+install := object.get(input, ["authority", "install"], {})
+
+# Leg 1 -- the tool exists at all. A platform tool exists because
+# data.tools names it; an INSTALLED tool exists because the org's pin
+# names it, or because the manifest fetched during the drift check names
+# it (m4a-marketplace.md D6). tool_known is established by the gateway
+# from those two sources only -- never from the caller, never from the
+# catalog text. A marketplace call from an org with no installs, or a
+# name neither the pin nor the live manifest knows, keeps this reason.
 violations contains "unknown_tool" if {
 	not tool in data.tools
+	not object.get(resolved, "tool_known", false)
 }
 
 # Leg 2 -- delegability (m3-delegation.md D6; SR-B3-7, SR-B8-2): AUTHORITY
@@ -150,13 +173,44 @@ violations contains "not_in_session_scope" if {
 	not passes("in_scope")
 }
 
+# Leg 6.5 -- schema drift (M4a T5; m4a-marketplace.md D3/D6, SR-B8-7).
+#
+# Per MCP call the gateway re-fetches the publisher's manifest and
+# compares the SHA-256 of exactly the fetched bytes against the pin.
+# pin_verified is that comparison's answer, established by the gateway;
+# it is true ONLY when the fetch succeeded AND the digests match. A
+# manifest that cannot be fetched is NOT "no drift" (M4a-N2's trap: an
+# unreachable drift check that reported no drift would be the
+# fail-open shape) -- it reads false here, and this leg fires, so the
+# reason names the re-approval the org must now make.
+#
+# The guard is tool_known, so this leg touches only the marketplace
+# channel: a platform tool never carries pin_verified and never reads it
+# (the platform legs are unchanged for them). A pinned tool whose
+# publisher rewrote a description, and a rug-pulled name the live
+# manifest invented, both die HERE with one reason -- the bytes on the
+# server are no longer the bytes the org approved.
+violations contains "schema_drift_reapproval_required" if {
+	not tool in data.tools
+	object.get(resolved, "tool_known", false)
+	not object.get(resolved, "pin_verified", false)
+}
+
 # Leg 5 -- the org's grants, in policy data (m3-delegation.md D9): deploy-
 # time, read-only at runtime (SR-B8-3), reviewed as a diff in this zone.
+#
+# M4a T5: the PIN is the grant for an installed tool (D8 -- the install
+# is the org's consent decision). tool_in_pin is the platform's fact,
+# computed against the pinned bytes; a name that is only LIVE-known does
+# NOT pass this leg by the pin's absence -- it dies at the drift leg
+# first, which is the whole point of the drift leg's position after
+# role and before the egress legs.
 # Keyed by the org the SESSION ROW names. An org the data does not list is
 # granted nothing -- there is no default grant, because a default is a
 # fail-open.
 violations contains "org_grant_absent" if {
 	not tool in object.get(org_grants, org, [])
+	not object.get(install, "tool_in_pin", false)
 }
 
 # Total, like the lookups at the top: policy data with no org_grants at all
@@ -216,6 +270,23 @@ violations contains "tenant_data_egress" if {
 	"untrusted" in derived_from
 }
 
+# The marketplace channel onto the same leg (M4a T5; m4a-marketplace.md
+# D5, SR-B4-12/SR-B5-4 read for installed tools). ONE requirement --
+# tenant-derived bytes leaving without the org's consent -- now has two
+# paths, and they share ONE reason rather than minting a synonym the
+# PoCs must learn (the M3 rule: a reason is a requirement, not a
+# channel). The consent is the pin's declared input class, established
+# by the platform against the PIN; a publisher who declared
+# document_content from the start has the org's blessing and no leg
+# here can read intent (M4a-N1) -- the install review is load-bearing
+# and the writeup says so.
+violations contains "tenant_data_egress" if {
+	not tool in data.tools
+	object.get(resolved, "tool_known", false)
+	"untrusted" in derived_from
+	not object.get(install, "receives_document_content", false)
+}
+
 # The ordered leg list. A comprehension over an ARRAY preserves order, so
 # ordered_violations is the failing legs in evaluation order and
 # ordered_violations[0] is the first one.
@@ -224,6 +295,7 @@ leg_order := [
 	"control_plane_not_delegable",
 	"session_expired",
 	"not_in_session_scope",
+	"schema_drift_reapproval_required",
 	"org_grant_absent",
 	"role_does_not_permit",
 	"egress_not_allowlisted",

@@ -28,7 +28,7 @@ The surface that matters here is the **agent**: delegation, tool capability, the
 | M1 Tenancy & Identity | B1, B2 | [`m1-tenancy.md`](threat-models/m1-tenancy.md) | ✅ complete — [01](attacks/01-cross-tenant-read/) · [02](attacks/02-jwt-org-claim/) |
 | M2 Agent & Tool Gateway | B3, B4, B5 | [`m2-agent-gateway.md`](threat-models/m2-agent-gateway.md) | ✅ complete — [03](attacks/03-indirect-injection/) · [04](attacks/04-ssrf-metadata/) · real-model [experiments](experiments/) |
 | M3 Delegation & Confused Deputy | B3, B5, B8 | [`m3-delegation.md`](threat-models/m3-delegation.md) | ✅ complete — [05](attacks/05-confused-deputy/) · [06](attacks/06-policy-plane/) |
-| M4a Marketplace (MCP) | B6 | — | ⬜ not started |
+| M4a Marketplace (MCP) | B6 | [`m4a-marketplace.md`](threat-models/m4a-marketplace.md) | ✅ complete — [07](attacks/07-tool-poisoning/) · [08](attacks/08-rug-pull/) |
 | M4b Marketplace (Skills) | B9 | — | ⬜ not started |
 | M6 Publish & Program | — | — | ⬜ not started |
 
@@ -51,7 +51,7 @@ Every finding names the boundary it crosses.
 | **B8** | Control plane ↔ data plane (who can change policy) |
 | **B9** | Platform ↔ context supply chain (who may place *instructions* in the agent's context) |
 
-**Why B9 is its own boundary.** B5 is mediated by the gateway: every tool call passes a deterministic policy (the LLM judge is deferred to M4a, M2 D2). B4 says untrusted content is wrapped and marked as data, never concatenated as instructions. A poisoned *skill* defeats both by construction — it never crosses B5 (it enters at context-assembly time, before any tool call exists), and B4's rule is inapplicable because a skill *is* instructions the agent is meant to obey.
+**Why B9 is its own boundary.** B5 is mediated by the gateway: every tool call passes a deterministic policy. (M2 D2 once deferred an LLM judge to M4a; the M4a diff closed that deferral by citation — the baseline's `SR-B5-1` forbids a gate that consults a tool's self-description, so every M4a decision point is deterministic and behaviour-vs-declaration belongs to detection. See `threat-models/m4a-marketplace.md` D9.) B4 says untrusted content is wrapped and marked as data, never concatenated as instructions. A poisoned *skill* defeats both by construction — it never crosses B5 (it enters at context-assembly time, before any tool call exists), and B4's rule is inapplicable because a skill *is* instructions the agent is meant to obey.
 
 ## Run it
 

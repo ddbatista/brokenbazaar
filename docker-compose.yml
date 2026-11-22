@@ -11,6 +11,7 @@
 x-fixture-hosts: &fixture-hosts
   - "metadata.google.internal:172.28.0.20"
   - "attacker.example:172.28.0.21"
+  - "publisher.example:172.28.0.22"
 
 services:
   db:
@@ -48,6 +49,9 @@ services:
       # refuses to start on a split brain.
       GATEWAY_URL: "http://gateway:8081"
       DATABASE_URL: "postgres://bazaar:bazaar@db:5432/bazaar?sslmode=disable"
+    # M4a T4: the API dials publisher endpoints at install discovery
+    # (T3's fetch). Without the fixture hosts it cannot resolve them.
+    extra_hosts: *fixture-hosts
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -152,8 +156,30 @@ services:
         ipv4_address: 172.28.0.21
 
   # --- Services below arrive with their modules ---------------------------
-  # evil-mcp        (M4a) attacker-controlled MCP server        [hostile fixture]
   # evil-publisher  (M4b) mutable skill-reference host          [hostile fixture]
+
+  # evil-mcp (M4a): the attacker-controlled MCP server -- a first-class,
+  # reproducible hostile fixture (plan M4a Build line). Same image, same
+  # pattern as the collector; its evidence port is loopback-only like
+  # every published port in this file. The flip/reset endpoints are the
+  # rug pull, driven by the PoC; /calls is finding 07 and 08's evidence.
+  evil-mcp:
+    build:
+      context: ./fixtures
+    container_name: bb-evil-mcp
+    command: ["evil_mcp.py"]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    ports:
+      - "127.0.0.1:9200:80"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/calls', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      bazaar:
+        ipv4_address: 172.28.0.22
 
 volumes:
   db-data:

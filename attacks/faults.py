@@ -26,8 +26,21 @@ hold. That is the outcome T8 exists to make impossible (T8 D2).
         (enrichment_failed, "authority route unreachable"). M3 made the
         authority route a dependency of every decision; a new dependency
         is a new fault.
+    F4  the publisher's manifest unreachable FROM THE GATEWAY (M4a T7,
+        R-M4a-3 / M4a-N2): inside the LIVE gateway only, /etc/hosts'
+        publisher.example line is sed-ed to a dead address. The FIXTURE
+        ITSELF stays up -- the exploit's host-side control channel
+        (127.0.0.1:9200) and the API's install discovery still work, so
+        the run gets all the way to its attack beat and the drift check
+        fails there, which is the point: a drift denial recorded against
+        a manifest that could not be fetched is a pin that could not be
+        verified, and the exploit must exit 2 naming it -- never read
+        the fail-closed deny as "the drift control held". F4 runs only
+        the marketplace exploits (07, 08, discovered by source): 03-06
+        never dial the publisher, so their controls holding under F4 is
+        correct, not a silent pass.
 
-All three are deterministic. The mid-request window -- the gateway dying
+All four are deterministic. The mid-request window -- the gateway dying
 between the agent's probe and its /gate call -- is declared covered by
 unit tests rather than a timed kill that could flake: the Go executor
 fails closed on transport errors (app/agent), and agentlab parses a
@@ -67,16 +80,29 @@ def drives_agent(source: str) -> bool:
     return re.search(r"\blab\.(ask|run_agent|resume)\(", source) is not None
 
 
-def agent_exploits():
-    """Every attacks/0*-*/ finding whose exploit drives the agent (M3 T9 D1).
+def drives_fixture(source: str) -> bool:
+    """Does an exploit's source own fixture state (evil-mcp's channel)?
+
+    F4's blast radius: the publisher is a dependency of the marketplace
+    exploits only. 03-06 never dial it, so their controls holding under
+    F4 is correct -- running them would demand a failure they have no
+    path to, and a fault case that cannot fail is not a case.
+    """
+    import re
+    return re.search(r"\blab\.fixture_|import evil_mcp", source) is not None
+
+
+def agent_exploits(pick=drives_agent):
+    """Every attacks/0*-*/ finding whose exploit matches `pick`.
 
     Discovered, like run.py's findings: a new agent finding is run under
     every fault by existing, not by someone remembering to edit a list.
     The API-only exploits (01, 02) never meet the gate, so a gate fault
-    says nothing about them.
+    says nothing about them; F4 passes `drives_fixture` for the same
+    reason from the publisher's side.
     """
     return sorted(p for p in HERE.glob("0*-*")
-                  if (p / "exploit.py").is_file() and drives_agent((p / "exploit.py").read_text()))
+                  if (p / "exploit.py").is_file() and pick((p / "exploit.py").read_text()))
 
 
 def judge(exit_code: int, stdout: str, cause: str):
@@ -132,6 +158,24 @@ def api_reachable_from_gateway() -> bool:
     return proc.returncode == 0
 
 
+def publisher_reachable_from_gateway() -> bool:
+    """Can the gateway fetch the publisher's manifest? (F4's recovery check)
+
+    The /calls evidence route, not a healthcheck: the route the drift
+    check itself would dial, so recovery is verified against the thing
+    the fault removed -- the same discipline as F1 checking for the OPA
+    binary rather than /healthz.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "compose", "exec", "-T", "gateway", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://publisher.example/calls', timeout=5)"],
+            cwd=REPO, capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return False
+    return proc.returncode == 0
+
+
 def opa_present() -> bool:
     proc = subprocess.run(["docker", "compose", "exec", "-T", "gateway", "test", "-x", OPA],
                           cwd=REPO, capture_output=True, timeout=30)
@@ -144,6 +188,7 @@ class Fault(NamedTuple):
     undo: Callable[[], object]
     recovered: Callable[[], bool]   # checks the thing the fault removed
     cause: str                      # what the exploit's stdout must name
+    pick: Callable[[str], bool] = drives_agent  # which exploits are in the blast radius
 
 
 FAULTS = (
@@ -176,6 +221,29 @@ FAULTS = (
           # prints them: the route unreachable must deny as enrichment_failed
           # (SR-B8-4), not merely be mentioned.
           "'enrichment_failed': authority route unreachable"),
+    # F4 (M4a T7, R-M4a-3): the drift check's own dependency. /etc/hosts
+    # is a BIND MOUNT: it can be written in place but never renamed over
+    # (sed -i fails -- "Device or resource busy", found live), so the
+    # rewrite streams through the live file, F3's in-place discipline.
+    # A pattern SUBSTITUTION proved format-coupled (the sed matched
+    # nothing and the fault silently no-op'd, found live on the first
+    # run: exit 1 CONTROL HOLDS under an applied fault); the rewrite
+    # therefore REMOVES every publisher line, whatever separator Docker
+    # wrote it with, and appends the dead address -- total by
+    # construction, not by matching.
+    Fault("F4 the publisher's manifest unreachable from the gateway "
+          "(publisher.example -> a dead address inside the gateway)",
+          lambda: compose("exec", "-T", "-u", "root", "gateway", "sh", "-c",
+                          f"cp {HOSTS} {HOSTS}.fault && "
+                          f"grep -v publisher\\.example {HOSTS}.fault > {HOSTS} && "
+                          "echo '172.28.0.99 publisher.example' >> " + HOSTS),
+          lambda: compose("exec", "-T", "-u", "root", "gateway", "sh", "-c",
+                          f"cp {HOSTS}.fault {HOSTS} && rm {HOSTS}.fault"),
+          lambda: publisher_reachable_from_gateway() and gateway_healthy(),
+          # As check_drift_evidence prints it: the denial exists, but no
+          # comparison ran. Coupled on purpose, like F2 and F3.
+          "manifest that could not be fetched",
+          pick=drives_fixture),
 )
 
 
@@ -212,11 +280,17 @@ def check() -> int:
     if not exploits:
         raise lab.Operational("no agent exploit found to run under the faults")
     failures = 0
+    ran = 0
     for fault in FAULTS:
+        scoped = [n for n in exploits if fault.pick((HERE / n / "exploit.py").read_text())]
+        if not scoped:
+            raise lab.Operational(f"{fault.title}: no exploit in its blast radius -- "
+                                  "the fault has nothing to test")
         print(f"== {fault.title}")
         fault.apply()
         try:
-            for name in exploits:
+            for name in scoped:
+                ran += 1
                 code, out = run_exploit(name)
                 ok, why = (False, f"hung {out}") if code is None else judge(code, out, fault.cause)
                 print(f"   {'PASS' if ok else 'FAIL'}  {name}: {why}")
@@ -234,7 +308,8 @@ def check() -> int:
     if failures:
         print(f"faults: {failures} run(s) did NOT fail closed as exit 2 -- see above")
         return 1
-    print(f"faults: every exploit exited 2 under every fault ({len(FAULTS)} faults x {len(exploits)} exploits)")
+    print(f"faults: every exploit exited 2 under every fault "
+          f"({len(FAULTS)} faults, {ran} scoped runs)")
     return 0
 
 

@@ -3,7 +3,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ddbatista/brokenbazaar/app/mcp"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -95,10 +98,16 @@ func (e *NaiveExecutor) Execute(ctx context.Context, a Action, call CallContext)
 	// Not asked and denied -- not asked at all. There is no POST to
 	// /gate anywhere in this file, because "it's internal, so it's
 	// fine."
-	if !naiveAllowedTools[a.Tool] {
-		return Result{}, fmt.Errorf("agent: unknown tool %q", a.Tool)
-	}
-
+	//
+	// M4a T4: the naiveAllowedTools map above is now the PLATFORM
+	// registry, documented and tested, not the gate it was in M2 -- a
+	// name it does not carry is no longer "unknown" here but a
+	// MARKETPLACE candidate, and the admission check for those is the
+	// LIVE manifest (installedTool below): a name the publisher's
+	// current manifest carries is callable. That check exists and is
+	// worthless, the same B5 3.2 shape one boundary over -- the
+	// manifest's `receives` vocabulary is displayed at install review
+	// and never read on any path.
 	switch a.Tool {
 	case "read_document":
 		return e.readDocument(ctx, a.Args["id"])
@@ -115,8 +124,75 @@ func (e *NaiveExecutor) Execute(ctx context.Context, a Action, call CallContext)
 	case "set_member_role":
 		return e.setMemberRole(ctx, a.Args["user"], store.Role(a.Args["role"]), call.Session)
 	default:
-		return Result{}, fmt.Errorf("agent: unroutable tool %q", a.Tool)
+		// The marketplace dispatch (finding 07's exfil channel, finding
+		// 08's widened set). THE PLANTED 2.4: the tool's existence is
+		// checked against the LIVE manifest, fetched from the publisher's
+		// server on every dispatch -- never against the install row's
+		// pinned bytes. The check is real and worthless (B5 3.2): the
+		// live manifest's `receives` vocabulary is displayed at install
+		// review and never read on any path here.
+		return e.installedTool(ctx, a)
 	}
+}
+
+// installedTool resolves and executes a third-party tool call in-process,
+// with the agent's own client, mediated by nothing. The org's installs
+// come from the database; the manifest comes LIVE from each endpoint,
+// per call; the first install whose CURRENT manifest names the tool
+// wins (one listing per name is the lab's shape; documented, not
+// enforced). A name no live manifest carries is unknown, refused
+// loudly -- the same error shape as the platform tools' map check.
+func (e *NaiveExecutor) installedTool(ctx context.Context, a Action) (Result, error) {
+	if a.Tool == "" {
+		return Result{}, fmt.Errorf("agent: no tool named")
+	}
+	installs, err := store.ForOrg(e.cfg.Pool, e.cfg.OrgID).Installs(ctx)
+	if err != nil {
+		return Result{}, fmt.Errorf("agent: listing installs in org %s: %w", e.cfg.OrgID, err)
+	}
+	fetchFailures := 0
+	for _, ins := range installs {
+		body, err := liveManifest(ins.EndpointURL)
+		if err != nil {
+			// An unreachable server cannot vouch for a name; keep
+			// looking. Fail closed on the name, never open on the
+			// fetch -- but never silently: the refusal below names
+			// how many servers were consulted and how many failed,
+			// because a diagnosis-blind refusal is how a dead route
+			// reads as a policy decision.
+			fetchFailures++
+			continue
+		}
+		tools, _ := mcp.Parse(body)
+		for _, t := range tools {
+			if t.Name != a.Tool {
+				continue
+			}
+			// FOUND IN THE LIVE MANIFEST. Nothing here reads
+			// t.Receives -- the org's install-time consent vocabulary
+			// dies at this dispatch, which is finding 07's whole
+			// premise.
+			resp, err := marketplaceClient.Post(ins.EndpointURL, "application/json",
+				bytes.NewReader(mcp.CallRequest(a.Tool, a.Args)))
+			if err != nil {
+				return Result{}, fmt.Errorf("agent: calling %s at %s: %w", a.Tool, ins.EndpointURL, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return Result{}, fmt.Errorf("agent: %s answered HTTP %d calling %s", ins.EndpointURL, resp.StatusCode, a.Tool)
+			}
+			var out struct {
+				Result struct {
+					Content string `json:"content"`
+				} `json:"result"`
+			}
+			if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+				return Result{}, fmt.Errorf("agent: decoding %s's answer to %s: %w", ins.EndpointURL, a.Tool, err)
+			}
+			return unmediated(a.Tool, strings.TrimSpace(out.Result.Content)), nil
+		}
+	}
+	return Result{}, fmt.Errorf("agent: unknown tool %q (%d installs consulted, %d manifests unreachable)", a.Tool, len(installs), fetchFailures)
 }
 
 // readDocument runs in-process, against the session's own org.
