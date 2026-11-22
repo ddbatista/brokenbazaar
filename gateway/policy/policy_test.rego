@@ -333,3 +333,140 @@ test_no_document_tool_is_non_delegable if {
 test_empty_input_is_denied if {
 	decide({}).route == "deny"
 }
+
+
+# --- M4a T5: the marketplace channel ----------------------------------
+#
+# Every case changes only what it is about, on the same base call()
+# above. The drift leg's allow side is the consent cases below it; its
+# deny side is three shapes: the rewritten manifest (same tool, new
+# bytes), the unreachable server (nothing could be verified), and the
+# rug-pulled name (a tool the pin never knew). All three share ONE
+# reason, which is the point of the leg.
+
+installed_base := {
+	"resolved": {"tool_known": true, "pin_verified": true},
+	"authority": {
+		"role_now": "member",
+		"legs": all_pass,
+		"install": {
+			"exists": true,
+			"tool_in_pin": true,
+			"receives_document_content": false,
+		},
+	},
+}
+
+mkt_call(tool, extra) := object.union(call(tool, installed_base), extra)
+
+test_installed_tool_with_verified_pin_is_allowed if {
+	decide(mkt_call("summarize_notes", {})).route == "allow"
+}
+
+test_drift_denies_three_shapes_with_one_reason if {
+	# The rewritten manifest (same tool, new bytes), the unreachable
+	# server (M4a-N2's trap: nothing could be verified, which must not
+	# read as "no drift"), and a garbage live manifest: the policy sees
+	# ONE fact -- pin_verified false with the tool known -- and answers
+	# ONE reason. The distinction lives in the gateway's detail record,
+	# not in the decision.
+	every d in [
+		decide(mkt_call("summarize_notes",
+			{"resolved": {"tool_known": true, "pin_verified": false}})),
+		decide(mkt_call("export_archive",
+			{"resolved": {"tool_known": true, "pin_verified": false}})),
+	] {
+		d.reasons == ["schema_drift_reapproval_required"]
+	}
+}
+
+test_missing_drift_facts_fail_closed if {
+	# The marketplace call with NO resolved facts at all: tool_known
+	# defaults false, so the name is unknown -- and had tool_known been
+	# asserted without pin_verified, the drift leg's own default is the
+	# fail-closed direction (the M2 lesson, restated for this leg).
+	d := decide(call("summarize_notes", {}))
+	d.reasons == ["unknown_tool"]
+}
+
+test_drift_leg_masks_nothing_and_is_masked_by_nothing if {
+	# A rug-pulled name in an expired session dies at the session leg:
+	# ordinary session facts keep their reasons ahead of drift.
+	d := decide(object.union(mkt_call("export_archive",
+		{"resolved": {"tool_known": true, "pin_verified": false}}),
+		{"authority": {"role_now": "member",
+			"legs": {"within_time": false, "in_scope": true, "role_permits": true},
+			"install": {"exists": true, "tool_in_pin": false,
+				"receives_document_content": false}}}))
+	d.reasons == ["session_expired"]
+}
+
+test_marketplace_consent_denies_tenant_bytes_without_document_consent if {
+	# Finding 07's hardened shape: pin verified, tool known, every
+	# session leg passing -- the document bytes still may not leave,
+	# because the pin declared user_text only.
+	d := decide(object.union(mkt_call("summarize_notes", {}),
+		{"provenance": {"derived_from": ["user", "untrusted"]}}))
+	d.reasons == ["tenant_data_egress"]
+}
+
+test_marketplace_call_with_declared_document_consent_is_allowed if {
+	# The honest summarizer (M4a-N1): document_content declared at
+	# install, the org's blessing on record. No leg can read intent;
+	# the install review is load-bearing, and this allow is its verdict.
+	d := decide(object.union(mkt_call("summarize_notes",
+		{"provenance": {"derived_from": ["user", "untrusted"]}}),
+		{"authority": {"role_now": "member", "legs": all_pass,
+			"install": {"exists": true, "tool_in_pin": true,
+				"receives_document_content": true}}}))
+	d.route == "allow"
+}
+
+test_absent_pin_verified_fact_reads_as_drift_not_as_clean if {
+	# The fail-closed default on its own terms (the M2 lesson, restated
+	# for this leg): a marketplace call whose resolved facts name the
+	# tool but say NOTHING about the pin was never verified. Absence is
+	# "not established", never "fine" -- the same asymmetry
+	# denied_range's TRUE default carries.
+	# replace(), not a union: a merge would keep the base's
+	# pin_verified true, and the whole point is its ABSENCE.
+	d := decide(replace(mkt_call("summarize_notes", {}),
+		"resolved", {"tool_known": true}))
+	d.reasons == ["schema_drift_reapproval_required"]
+}
+
+test_rug_pulled_name_dies_at_drift_not_at_the_grant_leg if {
+	# The module's PoC contract (m4a-marketplace.md 7): a name only the
+	# live manifest knows -- every session leg passing, tool_in_pin
+	# false -- is the rug pull's own shape, and the reason the org must
+	# read is the re-approval, not "we never granted this". True as the
+	# grant leg may read, it would bury the thesis reason; drift
+	# evaluates first. Found live, where the first cut of this
+	# amendment had drift after the grant leg and the run answered
+	# org_grant_absent.
+	d := decide(object.union(mkt_call("export_archive",
+		{"resolved": {"tool_known": true, "pin_verified": false}}),
+		{"authority": {"role_now": "member", "legs": all_pass,
+			"install": {"exists": true, "tool_in_pin": false,
+				"receives_document_content": false}}}))
+	d.reasons == ["schema_drift_reapproval_required"]
+}
+
+test_platform_tools_carry_no_marketplace_channel if {
+	# The platform legs are unchanged: read_document with install facts
+	# accidentally present still decides on its own legs alone.
+	d := decide(call("read_document", installed_base))
+	d.route == "allow"
+}
+
+test_live_known_name_without_pin_consent_still_fails_the_grant_leg if {
+	# A name the pin does not carry (tool_in_pin false) with NO drift
+	# fact established: the org granted it nothing. This is the leg-5
+	# widening's deny side.
+	d := decide(object.union(mkt_call("export_archive", {}),
+		{"resolved": {"tool_known": true, "pin_verified": true},
+		 "authority": {"role_now": "member", "legs": all_pass,
+			"install": {"exists": true, "tool_in_pin": false,
+				"receives_document_content": false}}}))
+	d.reasons == ["org_grant_absent"]
+}
