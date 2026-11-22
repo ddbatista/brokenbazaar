@@ -292,9 +292,20 @@ def marketplace_facts(tool: str, authority: dict, platform_tools) -> tuple[dict,
     if relevant is None:
         relevant = next((c for c in checked if tool in c["live_names"]), None)
     if relevant is None:
-        return {"tool_known": False, "pin_verified": False}, None
+        return {"tool_known": False, "pin_verified": False,
+                "manifest_fetched": False}, None
 
-    return {"tool_known": True, "pin_verified": relevant["digest_ok"]}, relevant
+    return {"tool_known": True,
+            "pin_verified": relevant["digest_ok"],
+            # M4a-N2: the drift reason's honesty depends on whether the
+            # comparison RAN. A manifest that could not be fetched is a
+            # pin that could not be verified (fail closed for the tenant
+            # -- deny), but the RECORD must say so, because a run that
+            # reads a drift denial on an unfetched manifest as "the drift
+            # control held" would be asserting a comparison that never
+            # happened. This fact is what the fault injection (make
+            # faults, F4) and the exploits' drift-evidence check read.
+            "manifest_fetched": relevant["fetched"]}, relevant
 
 
 def execute(cfg: Config, tool: str, args: dict, session: dict,

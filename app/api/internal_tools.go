@@ -207,6 +207,16 @@ func (it *internalTools) authority(w http.ResponseWriter, r *http.Request, _ aut
 		internalError(w, err)
 		return
 	}
+	// A store list for an org with no installs returns a NIL slice, and
+	// Go marshals nil as JSON null -- which the gateway's strict
+	// validation correctly refuses as "lacks an installs array": null is
+	// not "no installs", it is NO ANSWER ABOUT INSTALLS. Found live by
+	// the F1 fault run (every 03-06 hardened control exited
+	// enrichment_failed on a freshly seeded org). An org with no
+	// installs answers an EMPTY ARRAY, deliberately.
+	if installs == nil {
+		installs = []installFact{}
+	}
 	// M4a T5 (mediation): installed-tool calls ride the M3 legs
 	// (m4a-marketplace.md A8.2/A8.6), and their action class is Read --
 	// http_fetch's own precedent (M3 T6 D1: "any role may fetch"). The

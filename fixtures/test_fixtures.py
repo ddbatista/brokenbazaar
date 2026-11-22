@@ -32,7 +32,9 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import _http  # noqa: E402
 import collector  # noqa: E402
+import evil_mcp  # noqa: E402
 import mock_metadata  # noqa: E402
 
 TOKEN_PATH = mock_metadata.TOKEN_PATH
@@ -209,6 +211,78 @@ class MockMetadata(unittest.TestCase):
     def test_unknown_paths_are_404(self):
         status, _, _ = self.srv.request("GET", "/nope")
         self.assertEqual(status, 404)
+
+
+class EvilMCP(unittest.TestCase):
+    """The M4a hostile fixture's contract (plan M4a T7: "fixture contract
+    tests"). Everything the 07/08 exploits and the F4 fault stand on:
+
+    the two manifest states and their flip/reset; the evidence log's
+    shape INCLUDING the per-installation identity echo (SR-B5-8: the
+    identity is evidence, not assertion); and that reset restores the
+    pre-flip state AND clears the log, so a crashed run cannot poison
+    the next one's "pre-flip".
+    """
+
+    def setUp(self):
+        self.srv = _Served(lambda h, p: _http.FixtureServer(
+            (h, p), evil_mcp.make_handler(evil_mcp.EvilMCP())))
+
+    def tearDown(self):
+        self.srv.close()
+
+    def _list(self, path):
+        status, _, body = self.srv.request(
+            "POST", path, json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
+        return status, body
+
+    def _call(self, path, tool, arguments, headers=None):
+        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                              "params": {"name": tool, "arguments": arguments}})
+        return self.srv.request("POST", path, payload, headers=headers or {})
+
+    def test_pre_flip_serves_manifest_a_and_clean_is_constant(self):
+        status, body = self._list("/evil")
+        self.assertEqual((status, body), (200, evil_mcp.MANIFEST_A))
+        status, body = self._list("/clean")
+        self.assertEqual((status, body), (200, evil_mcp.MANIFEST_CLEAN))
+
+    def test_flip_swaps_to_manifest_b_and_reset_restores_a(self):
+        self.srv.request("POST", "/admin/flip", "")
+        status, body = self._list("/evil")
+        self.assertEqual((status, body), (200, evil_mcp.MANIFEST_B))
+        self.srv.request("POST", "/admin/reset", "")
+        status, body = self._list("/evil")
+        self.assertEqual((status, body), (200, evil_mcp.MANIFEST_A))
+
+    def test_tools_call_answers_the_envelope_and_records_the_identity(self):
+        status, _, body = self._call("/evil", "summarize_notes",
+                                      {"query": "x"}, headers={"X-BB-Install": "inst-1"})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["result"]["content"], "Processed.")
+        _, _, log = self.srv.request("GET", "/calls")
+        entry = json.loads(log)["calls"][0]
+        self.assertEqual(entry["tool"], "summarize_notes")
+        self.assertEqual(entry["arguments"], {"query": "x"})
+        # SR-B5-8's echo: the identity the GATEWAY derived is recorded,
+        # and a dial without one records the empty string -- which is what
+        # makes the vulnerable build's headerless calls distinguishable.
+        self.assertEqual(entry["install"], "inst-1")
+        self._call("/evil", "export_archive", {"query": "y"})
+        _, _, log = self.srv.request("GET", "/calls")
+        self.assertEqual(json.loads(log)["calls"][1]["install"], "")
+
+    def test_reset_clears_the_evidence_log(self):
+        self._call("/evil", "summarize_notes", {"query": "x"})
+        self.srv.request("POST", "/admin/reset", "")
+        _, _, log = self.srv.request("GET", "/calls")
+        self.assertEqual(json.loads(log), {"calls": []})
+
+    def test_unknown_listing_is_404_and_unknown_method_is_400(self):
+        status, _ = self._list("/nope")
+        self.assertEqual(status, 404)
+        status, _, _ = self.srv.request("POST", "/evil", '{"jsonrpc":"2.0","method":"bogus"}')
+        self.assertEqual(status, 400)
 
 
 if __name__ == "__main__":

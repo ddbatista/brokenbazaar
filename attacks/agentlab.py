@@ -300,6 +300,32 @@ def check_not_failed_closed(decisions: list):
                 f"'{reason}'{detail}) -- it could not decide, so this run cannot judge the control")
 
 
+def check_drift_evidence(decisions: list):
+    """Raise Operational if a drift denial was recorded against a manifest
+    that could never be fetched (M4a-N2's trap, read at the record).
+
+    A publisher that cannot be reached is a pin that could not be
+    verified: the call is denied (fail closed, the tenant is safe), but
+    the DENIAL is not evidence the drift control held -- no comparison
+    ran. A run that returned exit 1 here would be asserting a control
+    that never evaluated, the same silent pass a dead OPA produces.
+
+    The gateway records `manifest_fetched` beside the drift facts for
+    exactly this read (gate.marketplace_facts); fault F4 makes it false
+    for real, and every marketplace exploit must name it, not swallow it.
+    """
+    for rec in decisions:
+        reason = (rec.get("reasons") or [""])[0]
+        if (rec.get("route") == "deny"
+                and reason == "schema_drift_reapproval_required"
+                and not (rec.get("resolved") or {}).get("manifest_fetched", False)):
+            raise Operational(
+                "the drift denial was recorded against a manifest that could not be "
+                f"fetched ({rec.get('decision_id')}, tool {rec.get('tool')}) -- the "
+                "publisher was unreachable from the gateway, no comparison ran, and "
+                "this run cannot say the drift control held")
+
+
 def last_seq(records: list) -> int:
     """The collector's high-water mark: 0 when it has recorded nothing."""
     return max((r.get("seq", 0) for r in records), default=0)

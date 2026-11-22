@@ -124,6 +124,38 @@ func TestAuthorityGarbageNameStillFailsRole(t *testing.T) {
 	}
 }
 
+// TestAuthorityAnswersAnEmptyInstallsArrayNotNull: an org with no
+// installs must answer `"installs": []`, never JSON null -- the
+// gateway's strict validation refuses null as "no answer about
+// installs", and nil-slice marshalling turns exactly that bug loose
+// (found live by the F1 fault run on a freshly seeded org).
+func TestAuthorityAnswersAnEmptyInstallsArrayNotNull(t *testing.T) {
+	it, _ := fakeInternalTools()
+	// The store's real shape for an org with no installs: a NIL slice.
+	// (A nil installLister interface would panic at installFacts -- the
+	// fake models the DATA, not a broken receiver.)
+	it.installsFor = func(string) installLister { return fakeInstalls{} }
+	rec := serve(it.authority, http.MethodGet,
+		"/internal/sessions/"+sAdmin+"/authority?tool=read_document", "",
+		map[string]string{"session_id": sAdmin})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authority = %d", rec.Code)
+	}
+	var body struct {
+		Installs []json.RawMessage `json:"installs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if body.Installs == nil {
+		t.Fatalf("authority answered installs=null for an org with no installs: %s",
+			rec.Body.String())
+	}
+	if len(body.Installs) != 0 {
+		t.Fatalf("installs = %d entries, want 0", len(body.Installs))
+	}
+}
+
 func fakeInternalTools() (*internalTools, *fakeDocs) {
 	all := []string{"read_document", "update_document", "delete_document", "http_fetch"}
 	sessions := fakeSessions{
