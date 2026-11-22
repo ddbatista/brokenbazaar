@@ -34,6 +34,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/ddbatista/brokenbazaar/app/authz"
+	"github.com/ddbatista/brokenbazaar/app/skill"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -305,6 +307,64 @@ func main() {
 		log.Fatalf("seed: %v", err)
 	}
 	fmt.Printf("listing   %-20s %s (v2, digest %s)\n", item.Name, item.ID, store.ManifestDigest(v2))
+
+	// --- M4b: the platform's own skill, installed and authorised ------
+	// SR-B9-11: platform-shipped content enters the same index, through
+	// the same parse, the same pin and the same member authorisation as
+	// any third party's -- first-party is a precedence value, never an
+	// exemption from review. is_platform's ONLY writer is
+	// RegisterPlatformPublisher (catalog.go): no route accepts the class
+	// as an input, and the platform decides who holds it.
+	//
+	// The bundle is skill.ExampleBundle -- one home, shared with the
+	// parser's TestDigestVector, so the seed's listing and any future
+	// fixture cannot drift apart byte-wise. The vocabulary binding is
+	// authz.ActionFor: the same one home the publish route will pass
+	// (the store never imports authz; a copied list would be the
+	// two-homes drift).
+	platPub, err := admin.RegisterPlatformPublisher(ctx, "BrokenBazaar Labs")
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	fmt.Printf("publisher %-20s %s (platform)\n", platPub.DisplayName, platPub.ID)
+
+	platStore := store.ForPublisher(pool, platPub.ID)
+	skillIdx, err := skill.ParseFrontmatter([]byte(skill.ExampleBundle), authz.IsKnownTool)
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	skillItem, err := platStore.PublishSkillItem(ctx, skillIdx.Name, []byte(skill.ExampleBundle), skillIdx)
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	fmt.Printf("listing   %-20s %s (skill v1, digest %s)\n", skillItem.Name, skillItem.ID, skillItem.ManifestDigest)
+
+	// Acme's admin installs it -- the org's consent decision, on the
+	// org-bound handle -- and the member authorises it for their own
+	// sessions: the S5 plane, migration 005. Both decisions are the
+	// product's own front door, exercised here so the index a session
+	// reads is non-empty and its ordering rule (platform first, then
+	// install time, then name) is observable from the seed alone.
+	acmeAdmin, ok, err := admin.UserByEmail(ctx, "admin@acme.example")
+	if err != nil || !ok {
+		log.Fatalf("seed: acme admin lookup: %v (ok=%v)", err, ok)
+	}
+	acmeMember, ok, err := admin.UserByEmail(ctx, "member@acme.example")
+	if err != nil || !ok {
+		log.Fatalf("seed: acme member lookup: %v (ok=%v)", err, ok)
+	}
+	acmeStore := store.ForOrg(pool, acmeOrgID)
+	skillInstall, err := acmeStore.InstallSkillItem(ctx, skillItem.ID, acmeAdmin.ID, []byte(skill.ExampleBundle), skillIdx)
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	fmt.Printf("install   %-20s %s (pin %s)\n", skillItem.Name, skillInstall.ID, skillInstall.PinnedDigest)
+
+	skillAuth, err := acmeStore.AuthoriseSkill(ctx, skillInstall.ID, acmeMember.ID)
+	if err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+	fmt.Printf("authorise %-20s member   %s\n", skillItem.Name, skillAuth.ID)
 
 	fmt.Printf("\nseed: done. every seeded user's password is %q (R-M1-4, lab only).\n", seedPassword)
 }

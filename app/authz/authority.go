@@ -57,6 +57,15 @@ func ActionFor(tool string) (Action, bool) {
 	return a, ok
 }
 
+// IsKnownTool reports whether tool is in the session vocabulary -- the
+// adapter callers (the skill routes, the seed) pass to
+// skill.ParseFrontmatter as the capability validator. One home: this
+// wraps the same map ActionFor reads; no caller copies the list.
+func IsKnownTool(tool string) bool {
+	_, ok := toolActions[tool]
+	return ok
+}
+
 // Derive computes the legs for one tool call at time now. Pure: the caller
 // reads the session row and passes the clock, so every leg is testable on
 // both sides without a database.

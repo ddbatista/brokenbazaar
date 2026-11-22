@@ -35,6 +35,11 @@ type CatalogItem struct {
 	Version        int
 	PublishedAt    time.Time
 	UpdatedAt      time.Time
+	// Type is the artifact kind (migration 005): "mcp_server" or
+	// "skill". Zero-value "" means the reader did not select it -- the
+	// M4a reads that predate skills -- and no caller may branch on the
+	// empty string as if it were a kind.
+	Type string
 }
 
 // PublisherStore is the publisher-bound handle: a publisher may mutate

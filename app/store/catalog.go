@@ -93,7 +93,7 @@ func (s *AdminStore) CatalogItem(ctx context.Context, itemID string) (CatalogIte
 	var d CatalogItemDetail
 	err := s.pool.QueryRow(ctx,
 		`SELECT c.id::text, c.publisher_id::text, c.name, c.endpoint_url,
-		        c.manifest, c.manifest_digest, c.version, c.published_at, c.updated_at,
+		        c.manifest, c.manifest_digest, c.version, c.published_at, c.updated_at, c.type,
 		        p.id::text, p.display_name, p.created_at,
 		        (SELECT count(*) FROM installs i
 		         WHERE i.item_id = c.id AND i.status = 'active')
@@ -102,7 +102,7 @@ func (s *AdminStore) CatalogItem(ctx context.Context, itemID string) (CatalogIte
 		 WHERE c.id = $1::uuid`,
 		itemID,
 	).Scan(&d.ID, &d.PublisherID, &d.Name, &d.EndpointURL,
-		&d.Manifest, &d.ManifestDigest, &d.Version, &d.PublishedAt, &d.UpdatedAt,
+		&d.Manifest, &d.ManifestDigest, &d.Version, &d.PublishedAt, &d.UpdatedAt, &d.Type,
 		&d.Publisher.ID, &d.Publisher.DisplayName, &d.Publisher.CreatedAt,
 		&d.InstallCount,
 	)
@@ -145,7 +145,7 @@ func (s *AdminStore) CatalogItem(ctx context.Context, itemID string) (CatalogIte
 // catalog index is what an org browses before an install decision.
 func (s *AdminStore) CatalogItems(ctx context.Context) ([]CatalogItem, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id::text, publisher_id::text, name, endpoint_url, manifest, manifest_digest, version, published_at, updated_at
+		`SELECT id::text, publisher_id::text, name, endpoint_url, manifest, manifest_digest, version, published_at, updated_at, type
 		 FROM catalog_items
 		 ORDER BY published_at DESC, id`,
 	)
@@ -158,10 +158,33 @@ func (s *AdminStore) CatalogItems(ctx context.Context) ([]CatalogItem, error) {
 	for rows.Next() {
 		var it CatalogItem
 		if err := rows.Scan(&it.ID, &it.PublisherID, &it.Name, &it.EndpointURL,
-			&it.Manifest, &it.ManifestDigest, &it.Version, &it.PublishedAt, &it.UpdatedAt); err != nil {
+			&it.Manifest, &it.ManifestDigest, &it.Version, &it.PublishedAt, &it.UpdatedAt, &it.Type); err != nil {
 			return nil, fmt.Errorf("store: reading catalog: %w", err)
 		}
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+// RegisterPlatformPublisher registers the platform's OWN publisher row
+// (SR-B9-11): is_platform is the precedence value -- platform >
+// reviewed > third-party under SR-B9-4 -- and its home is the publisher
+// row, because the platform decides who is first-party; a publisher
+// cannot claim the class. This is the ONLY writer of is_platform=true:
+// no route accepts it as an input, and the seed is the platform's own
+// hand. The platform's skills then go through the same parse, the same
+// pin and the same index as anyone else's -- first-party is a
+// precedence value, never an exemption from review.
+func (s *AdminStore) RegisterPlatformPublisher(ctx context.Context, displayName string) (Publisher, error) {
+	pub := Publisher{ID: NewID(), DisplayName: displayName}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO publishers (id, display_name, is_platform)
+		 VALUES ($1::uuid, $2, true)
+		 RETURNING created_at`,
+		pub.ID, pub.DisplayName,
+	).Scan(&pub.CreatedAt)
+	if err != nil {
+		return Publisher{}, fmt.Errorf("store: registering platform publisher: %w", err)
+	}
+	return pub, nil
 }

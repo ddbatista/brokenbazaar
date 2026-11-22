@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"github.com/ddbatista/brokenbazaar/app/skill"
 )
 
 // ManifestDigest is the pin's hash: sha256 over the RAW manifest bytes,
@@ -46,6 +48,14 @@ type Install struct {
 	EndpointURL     string
 	EndpointAddress string
 	Status          string
+	// ItemType is the artifact kind copied at install (migration 005):
+	// the org's record of WHAT they installed, read back without a
+	// join, exactly as EndpointURL is the record of where an MCP server
+	// answered. SkillIndex is the parse of the pinned bytes, stored
+	// beside the pin at install and recomputed only when the pin
+	// advances -- nil for MCP installs.
+	ItemType   string
+	SkillIndex *skill.Index
 }
 
 // InstallChange is one row of the install plane's immutable audit
