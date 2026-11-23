@@ -9,7 +9,27 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./api
+
+# --- api-build (M4b T3) -------------------------------------------------------
+# The API's own tag split, AGENT_TAGS's exact pattern. Until M4b the API
+# was mode-neutral by design (M4a's rule: a route that misbehaved in
+# vulnerable mode would blur which gap the findings measure), so one
+# tagless binary served. M4b inverts that rule for exactly one route:
+# the skill listing's REVIEW payload (review_vulnerable.go /
+# review_hardened.go), because 09's gap IS the review surface -- the
+# naive build's spec-faithful S3 (name and description only) is the
+# finding itself, and hiding it would blur the gap the module measures
+# (m4b-skills.md, third derivation; skills.go's header).
+#
+# API_TAGS defaults to EMPTY, i.e. the HARDENED review: a forgotten
+# arg builds the safe one, same failure direction as AGENT_TAGS.
+FROM build AS api-build
+ARG API_TAGS=
+RUN case "$API_TAGS" in \
+      ""|vulnerable) ;; \
+      *) echo "API_TAGS must be empty (hardened) or 'vulnerable', got '$API_TAGS'" >&2; exit 1 ;; \
+    esac \
+    && CGO_ENABLED=0 go build -trimpath -tags "$API_TAGS" -o /out/api ./api
 
 # --- agent (M2, T6 D2) -------------------------------------------------------
 # One binary per image, selected by build arg -- T3 D4's build-tag split
@@ -38,7 +58,7 @@ ENTRYPOINT ["/app/agent"]
 
 # --- api (default target) ----------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot AS api
-COPY --from=build /out/api /app/api
+COPY --from=api-build /out/api /app/api
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/app/api"]

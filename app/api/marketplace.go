@@ -15,6 +15,7 @@ import (
 	"github.com/ddbatista/brokenbazaar/app/auth"
 	"github.com/ddbatista/brokenbazaar/app/authz"
 	"github.com/ddbatista/brokenbazaar/app/mcp"
+	"github.com/ddbatista/brokenbazaar/app/skill"
 	"github.com/ddbatista/brokenbazaar/app/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -59,16 +60,21 @@ type marketplaceAdmin interface {
 // publisherStore is the publisher-bound write surface (ForPublisher).
 type publisherStore interface {
 	PublishItem(ctx context.Context, name, endpointURL string, manifest []byte) (store.CatalogItem, error)
+	PublishSkillItem(ctx context.Context, name string, bundle []byte, idx skill.Index) (store.CatalogItem, error)
 	UpdateItem(ctx context.Context, itemID string, manifest []byte) (store.CatalogItem, bool, error)
 }
 
 // installStore is the org-bound install surface (ForOrg).
 type installStore interface {
 	InstallItem(ctx context.Context, itemID, endpointURL, endpointAddress string, manifest []byte, installedBy string) (store.Install, error)
+	InstallSkillItem(ctx context.Context, itemID, installedBy string, bundle []byte, idx skill.Index) (store.Install, error)
 	Uninstall(ctx context.Context, installID, byUser string) (bool, error)
 	Reapprove(ctx context.Context, installID string, manifest []byte, byUser string) (store.Install, bool, error)
 	Installs(ctx context.Context) ([]store.Install, error)
 	Install(ctx context.Context, installID string) (store.Install, bool, error)
+	AuthoriseSkill(ctx context.Context, installID, userID string) (store.SkillAuthorisation, error)
+	RevokeSkillAuthorisation(ctx context.Context, authID, userID string) (bool, error)
+	SkillIndexForUser(ctx context.Context, userID string) ([]store.SkillIndexEntry, error)
 }
 
 func newMarketplaceHandlers(admin *store.AdminStore, pool *pgxpool.Pool, secret []byte) *marketplaceHandlers {
@@ -222,9 +228,23 @@ func (m *marketplaceHandlers) publishListing(w http.ResponseWriter, r *http.Requ
 		Name        string `json:"name"`
 		EndpointURL string `json:"endpoint_url"`
 		Manifest    string `json:"manifest"`
+		Type        string `json:"type"`
+		Bundle      string `json:"bundle"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, mcp.MaxManifestBytes+4096)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// M4b: type=skill posts the BUNDLE BYTES. The branch dispatch is
+	// the only place publish's shape widens: absent type stays the M4a
+	// manifest listing, unchanged, so every existing caller and test
+	// holds byte-for-byte.
+	if req.Type == "skill" {
+		if req.Name == "" {
+			writeJSONError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+		m.publishSkill(w, r, claims, req.Name, req.Bundle)
 		return
 	}
 	if req.Name == "" || len(req.Name) > 128 {
@@ -316,6 +336,23 @@ func (m *marketplaceHandlers) catalogDetail(w http.ResponseWriter, r *http.Reque
 		writeJSONError(w, http.StatusNotFound, "not found")
 		return
 	}
+
+	// M4b: a skill listing's review surface is mode-dependent (the
+	// repo's first route-level mode split -- skills.go's header states
+	// the inversion of M4a's mode-neutrality rule, and why 09's thesis
+	// requires it: the naive build's spec-faithful S3 IS the finding).
+	if detail.Type == "skill" {
+		idx, err := skill.ParseFrontmatter([]byte(detail.Manifest), authz.IsKnownTool)
+		if err != nil {
+			// The listing's bytes no longer parse: a broken row, fail
+			// closed rather than rendered half.
+			log.Printf("catalog detail: skill listing %s does not parse: %v", detail.ID, err)
+			writeJSONError(w, http.StatusInternalServerError, "the listing's bundle no longer parses")
+			return
+		}
+		writeJSON(w, http.StatusOK, buildSkillReviewPayload(idx, detail))
+		return
+	}
 	writeJSON(w, http.StatusOK, detail)
 }
 
@@ -372,6 +409,16 @@ func (m *marketplaceHandlers) installItem(w http.ResponseWriter, r *http.Request
 	}
 	if !found {
 		writeJSONError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	// M4b: the install verb's skill branch. Skills have no server to
+	// dial -- the artifact is the listing's posted bytes -- so the
+	// M4a discovery path does not run; the org consents to exactly the
+	// bytes the listing carries, re-parsed here so the pin and the
+	// index provably agree (skills.go's installSkill).
+	if detail.Type == "skill" {
+		m.installSkill(w, r, orgID, claims, detail)
 		return
 	}
 

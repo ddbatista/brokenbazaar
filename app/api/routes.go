@@ -295,4 +295,16 @@ func registerVulnerable(mux *http.ServeMux, h *docHandlers, m *memberHandlers, m
 	mux.HandleFunc("GET /orgs/{org_id}/installs", requireToken(secret, false, mk.listInstalls))
 	mux.HandleFunc("DELETE /orgs/{org_id}/installs/{install_id}", requireToken(secret, false, mk.uninstall))
 	mux.HandleFunc("POST /orgs/{org_id}/installs/{install_id}/reapprove", requireToken(secret, false, mk.reapprove))
+
+	// M4b T3: the skills plane. GET /orgs/{org_id}/skills is the S6
+	// index answer (the caller's own authorised skills, precedence-
+	// ordered); POST .../skills/{install_id}/authorise is S5, the
+	// member's own trust decision (no user_id in the request -- the
+	// caller IS the actor); DELETE .../skills/authorisations/{auth_id}
+	// is their own retreat. All three are control-plane verbs with no
+	// agent-tool, grammar-rule or internal-route counterpart, either
+	// mode (SR-B9-10, D8's verb set extended, not widened).
+	mux.HandleFunc("GET /orgs/{org_id}/skills", requireToken(secret, false, mk.skillIndex))
+	mux.HandleFunc("POST /orgs/{org_id}/skills/{install_id}/authorise", requireToken(secret, false, mk.authoriseSkill))
+	mux.HandleFunc("DELETE /orgs/{org_id}/skills/authorisations/{auth_id}", requireToken(secret, false, mk.revokeSkillAuthorisation))
 }

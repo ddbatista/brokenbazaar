@@ -208,6 +208,14 @@ func ParseFrontmatter(bundle []byte, knownTool func(string) bool) (Index, error)
 			return Index{}, fmt.Errorf("skill: reference %q is not an absolute http(s) URL", ref)
 		}
 	}
+	// References is optional in the frontmatter, but the FIELD always
+	// holds a list: the index's jsonb and every wire rendering must
+	// serialize [] -- never null (a null fetch surface would read as
+	// "unknown", not "none", and the M4a installs-answer rule applies
+	// one surface up).
+	if idx.References == nil {
+		idx.References = []string{}
+	}
 	if strings.TrimSpace(body) == "" {
 		return Index{}, fmt.Errorf("skill: the body is required and non-empty -- the body is the artifact (SR-B9-1)")
 	}

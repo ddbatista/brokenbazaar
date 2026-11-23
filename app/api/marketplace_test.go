@@ -13,6 +13,7 @@ import (
 
 	"github.com/ddbatista/brokenbazaar/app/auth"
 	"github.com/ddbatista/brokenbazaar/app/authz"
+	"github.com/ddbatista/brokenbazaar/app/skill"
 	"github.com/ddbatista/brokenbazaar/app/store"
 )
 
@@ -130,10 +131,29 @@ func (f *mpPubStore) UpdateItem(_ context.Context, itemID string, manifest []byt
 	return store.CatalogItem{ID: itemID, Manifest: string(manifest), ManifestDigest: store.ManifestDigest(manifest)}, f.found, nil
 }
 
+// M4b: the skill-plane fake halves. PublishSkillItem records the
+// bundle and answers the shape the store would (Type skill, the
+// digest over exactly these bytes).
+func (f *mpPubStore) PublishSkillItem(_ context.Context, name string, bundle []byte, idx skill.Index) (store.CatalogItem, error) {
+	f.publish++
+	if f.failNext {
+		return store.CatalogItem{}, errors.New("store refused")
+	}
+	f.last = bundle
+	if name != idx.Name {
+		return store.CatalogItem{}, errors.New("store: listing name disagrees with the bundle's frontmatter name")
+	}
+	return store.CatalogItem{ID: itemID, Name: name, Manifest: string(bundle),
+		ManifestDigest: store.ManifestDigest(bundle), Type: "skill"}, nil
+}
+
 type mpInstallStore struct {
 	installs    int
 	uninstalls  int
 	reapproves  int
+	authorises  int
+	revokes     int
+	authPairs   map[string]bool
 	pinned      []byte
 	addr        string
 	byUser      string
@@ -171,6 +191,51 @@ func (f *mpInstallStore) Install(_ context.Context, id string) (store.Install, b
 	return store.Install{ID: id, EndpointURL: "http://srv.example/"}, f.found, nil
 }
 
+// M4b: the skill-plane fake halves (skills_test.go exercises these).
+func (f *mpInstallStore) InstallSkillItem(_ context.Context, itemID, by string, bundle []byte, idx skill.Index) (store.Install, error) {
+	f.installs++
+	if f.failInstall {
+		return store.Install{}, errors.New("store: duplicate active install")
+	}
+	f.pinned = bundle
+	f.byUser = by
+	return store.Install{ID: installID, ItemID: itemID, InstalledBy: by,
+		PinnedManifest: string(bundle), PinnedDigest: store.ManifestDigest(bundle),
+		Status: "active", ItemType: "skill", SkillIndex: &idx}, nil
+}
+
+func (f *mpInstallStore) AuthoriseSkill(_ context.Context, installID, userID string) (store.SkillAuthorisation, error) {
+	f.authorises++
+	if f.authPairs == nil {
+		f.authPairs = map[string]bool{}
+	}
+	key := installID + "/" + userID
+	if f.authPairs[key] {
+		return store.SkillAuthorisation{}, errors.New("store: duplicate active authorisation")
+	}
+	f.authPairs[key] = true
+	return store.SkillAuthorisation{ID: "auth-1", OrgID: orgA, InstallID: installID, UserID: userID, Status: "active"}, nil
+}
+
+func (f *mpInstallStore) RevokeSkillAuthorisation(_ context.Context, authID, userID string) (bool, error) {
+	f.revokes++
+	return authID == "auth-1" && userID != "", nil
+}
+
+func (f *mpInstallStore) SkillIndexForUser(_ context.Context, userID string) ([]store.SkillIndexEntry, error) {
+	if userID == viewerA {
+		return []store.SkillIndexEntry{}, nil
+	}
+	return []store.SkillIndexEntry{{
+		InstallID: installID, Name: "meeting-notes",
+		Description:  "Prepare meeting notes from a document the user names.",
+		Triggers:     []string{"use when the user asks to prepare meeting notes"},
+		Capabilities: []string{"read_document", "update_document"},
+		Publisher:    "BrokenBazaar Labs", IsPlatform: true,
+		PinnedDigest: "e1f06dcd6f369f47eea7738a1a3113cc0de7f2293087c63fbba16696d0e34c79",
+	}}, nil
+}
+
 // mpServe builds the marketplace routes on fakes, through the same
 // requireToken wrapper production uses.
 var mpAdmin = &mpMarketAdmin{
@@ -206,10 +271,16 @@ func mpServe(t *testing.T) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /publishers/register", h.registerPublisher)
 	mux.HandleFunc("POST /catalog", requireToken([]byte(mpSecret), true, h.publishListing))
+	mux.HandleFunc("GET /catalog/{item_id}", requireToken([]byte(mpSecret), true, h.catalogDetail))
 	mux.HandleFunc("PATCH /catalog/{item_id}", requireToken([]byte(mpSecret), true, h.updateListing))
 	mux.HandleFunc("POST /orgs/{org_id}/installs", requireToken([]byte(mpSecret), true, h.installItem))
 	mux.HandleFunc("DELETE /orgs/{org_id}/installs/{install_id}", requireToken([]byte(mpSecret), true, h.uninstall))
 	mux.HandleFunc("POST /orgs/{org_id}/installs/{install_id}/reapprove", requireToken([]byte(mpSecret), true, h.reapprove))
+	// M4b: the skills plane, same wrapper (skills_test.go +
+	// review_*_test.go).
+	mux.HandleFunc("GET /orgs/{org_id}/skills", requireToken([]byte(mpSecret), true, h.skillIndex))
+	mux.HandleFunc("POST /orgs/{org_id}/skills/{install_id}/authorise", requireToken([]byte(mpSecret), true, h.authoriseSkill))
+	mux.HandleFunc("DELETE /orgs/{org_id}/skills/authorisations/{auth_id}", requireToken([]byte(mpSecret), true, h.revokeSkillAuthorisation))
 	return mux
 }
 

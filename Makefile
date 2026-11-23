@@ -12,12 +12,15 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-# AGENT_TAGS selects the agent image's binary (T6 D2). The two modes are
-# defined ONCE, here, as the pair -- every line that starts the stack uses
-# one of these, so HARDENED and AGENT_TAGS cannot be chosen apart. If they
-# ever are, the agent refuses to start (M2-N4).
-VULNERABLE_ENV := HARDENED=false AGENT_TAGS=vulnerable
-HARDENED_ENV   := HARDENED=true AGENT_TAGS=
+# AGENT_TAGS selects the agent image's binary (T6 D2); API_TAGS selects
+# the API image's binary (M4b T3 -- the skill review payload's mode
+# split, the repo's first route-level split). The two modes are defined
+# ONCE, here, as the pair -- every line that starts the stack uses one
+# of these, so HARDENED, AGENT_TAGS and API_TAGS cannot be chosen
+# apart. If they ever are, the agent refuses to start (M2-N4), and the
+# API's forgotten arg builds the safe review (Dockerfile api-build).
+VULNERABLE_ENV := HARDENED=false AGENT_TAGS=vulnerable API_TAGS=vulnerable
+HARDENED_ENV   := HARDENED=true AGENT_TAGS= API_TAGS=
 
 up: ## Start the stack (vulnerable mode)
 	$(VULNERABLE_ENV) $(COMPOSE) up -d --build
