@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -278,19 +279,44 @@ func (s *OrgStore) Installs(ctx context.Context) ([]Install, error) {
 // is the authoritative record of it ending.
 func (s *OrgStore) Install(ctx context.Context, installID string) (Install, bool, error) {
 	var ins Install
+	// M4b (found live at T4): this read predates skills and never
+	// hydrated item_type/skill_index -- the agent's loader hit the
+	// nil-skip on every skill load and the channel was silently dead
+	// while every probe of the WRITE path stayed green. A read that
+	// can't see a column a writer fills is a two-homes bug; this is
+	// the read that made them one.
+	var rawIndex string
+	// M4b (found live at T4, the second one): COALESCE(skill_index, '')
+	// types the whole expression as jsonb, so the '' fallback is PARSED
+	// as json and every call dies with 22P02 -- invalid input syntax --
+	// even on rows whose index is present. Cast the column to text
+	// FIRST, then coalesce: the fallback stays a string, and the query
+	// answers both artifact kinds.
 	err := s.pool.QueryRow(ctx,
 		`SELECT id::text, org_id::text, item_id::text, installed_by::text, installed_at,
-		        pinned_manifest, pinned_digest, endpoint_url, endpoint_address, status
+		        pinned_manifest, pinned_digest, endpoint_url, endpoint_address, status,
+		        item_type, COALESCE(skill_index::text, '')
 		 FROM installs
 		 WHERE id = $1::uuid AND org_id = $2::uuid`,
 		installID, s.orgID,
 	).Scan(&ins.ID, &ins.OrgID, &ins.ItemID, &ins.InstalledBy, &ins.InstalledAt,
-		&ins.PinnedManifest, &ins.PinnedDigest, &ins.EndpointURL, &ins.EndpointAddress, &ins.Status)
+		&ins.PinnedManifest, &ins.PinnedDigest, &ins.EndpointURL, &ins.EndpointAddress, &ins.Status,
+		&ins.ItemType, &rawIndex)
 	if err != nil {
 		if isNoRows(err) {
 			return Install{}, false, nil
 		}
 		return Install{}, false, fmt.Errorf("store: loading install %s in org %s: %w", installID, s.orgID, err)
+	}
+	if rawIndex != "" {
+		var idx skill.Index
+		if err := json.Unmarshal([]byte(rawIndex), &idx); err != nil {
+			// Loud, not silent: the row was written validated, so an
+			// unparsable index is corruption, and corruption must not
+			// degrade into a load path that quietly loads nothing.
+			return Install{}, false, fmt.Errorf("store: install %s holds an unparsable skill index: %w", installID, err)
+		}
+		ins.SkillIndex = &idx
 	}
 	return ins, true, nil
 }

@@ -143,6 +143,36 @@ func main() {
 		assembledPrompt = systemPrompt + "\n" + catalogPrompt
 	}
 
+	// M4b T4: the acting user's skill channel, the catalog's shape
+	// one channel over. The vulnerable build concatenates the index
+	// into the system prompt (09's description channel: the index is
+	// resident every turn, so being installed is delivery) and loads
+	// every triggered body unverified; the hardened build wraps the
+	// index as origin-publisher spans and, until T5's mediation
+	// lands, loads nothing.
+	skillsPrompt, err := agent.SkillsPrompt(ctx, pool, tgt.orgID, sess.ActingFor)
+	if err != nil {
+		log.Fatalf("agent: rendering the skill index: %v", err)
+	}
+	if skillsPrompt != "" {
+		assembledPrompt = assembledPrompt + "\n" + skillsPrompt
+	}
+	skillSpans, err := agent.SkillSpans(ctx, pool, tgt.orgID, sess.ActingFor)
+	if err != nil {
+		log.Fatalf("agent: rendering the skill index spans: %v", err)
+	}
+	loadedSkills, skillLoads, err := agent.LoadSkills(ctx, pool, tgt.orgID, sess.ActingFor, tgt.message)
+	if err != nil {
+		log.Fatalf("agent: loading triggered skills: %v", err)
+	}
+	for _, load := range skillLoads {
+		if err := audit.SkillLoad(load, agent.CallContext{Session: agent.SessionInfo{
+			ID: sess.ID, OrgID: sess.OrgID, ActingFor: sess.ActingFor,
+		}}); err != nil {
+			log.Fatalf("agent: recording the skill load: %v", err)
+		}
+	}
+
 	loop := &agent.Loop{
 		Assembler: agent.NewAssembler(),
 		Model:     &agent.ScriptedModel{},
@@ -154,6 +184,11 @@ func main() {
 		Sessions:     store.ForSession(pool, tgt.orgID, sess.ID),
 		SystemPrompt: assembledPrompt,
 		Catalog:      catalogSpans,
+		// M4b T4: the skill channel, same position discipline as the
+		// catalog -- index spans between the platform's speech and the
+		// transcript, loaded bodies after the index.
+		Skills:       skillSpans,
+		LoadedSkills: loadedSkills,
 		// T5: the platform context every dispatch and audit record
 		// carries -- set once from the session row, never from anything
 		// the model produced (M2-N3).

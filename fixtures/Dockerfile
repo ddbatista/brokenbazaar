@@ -14,7 +14,9 @@ FROM python:3.13-slim@sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045ef
 WORKDIR /fixtures
 
 # Stdlib only. No requirements.txt, no pip install -- by house rule.
-COPY _http.py collector.py mock_metadata.py evil_mcp.py /fixtures/
+# evil_skill.py is deliberately NOT in the image: it is bundle DATA the
+# host-side PoCs import (agentlab's pattern), not a served fixture.
+COPY _http.py collector.py mock_metadata.py evil_mcp.py evil_publisher.py /fixtures/
 
 # Non-root. Both listen on :80 because the URLs in the writeups are
 # http://attacker.example/ and http://metadata.google.internal/; binding

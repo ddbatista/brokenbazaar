@@ -553,6 +553,65 @@ def uninstall_item(base: str, admin_token: str, org: str, install_id: str) -> in
     return status
 
 
+# --- M4b: the skills plane's front-door verbs (agentlab's marketplace
+# pattern, one channel over: publish through the route, install pins
+# the posted bytes, authorise is the member's own decision).
+
+
+def publish_skill(base: str, publisher_token: str, name: str, bundle: str) -> dict:
+    """Publish a skill listing through the catalog's front door; returns the row."""
+    status, text = http("POST", f"{base}/catalog",
+                        {"type": "skill", "name": name, "bundle": bundle},
+                        token=publisher_token)
+    if status != 201:
+        raise Operational(f"publishing skill {name!r} failed: {status} {text[:200]}")
+    return json.loads(text)
+
+
+def install_skill(base: str, admin_token: str, org: str, item_id: str,
+                  bundle: str) -> dict:
+    """Install a skill listing as the org's admin; asserts the pin is the
+    bundle's exact bytes -- the same evidence premise install_item states,
+    with the catalog playing discovery's part (skills have no server)."""
+    import hashlib
+    status, text = http("POST", f"{base}/orgs/{org}/installs", {"item_id": item_id},
+                        token=admin_token)
+    if status != 201:
+        raise Operational(f"installing skill {item_id} failed: {status} {text[:200]}")
+    row = json.loads(text)
+    want = hashlib.sha256(bundle.encode()).hexdigest()
+    if row.get("PinnedDigest") != want:
+        raise Operational("the install pinned bytes that are NOT the bundle's "
+                          f"({row.get('PinnedDigest', '')[:16]} != {want[:16]}) -- the "
+                          "evidence premise is broken before the run began")
+    return row
+
+
+def authorise_skill(base: str, member_token: str, org: str, install_id: str) -> dict:
+    """S5: the member's own trust decision -- no user_id field exists to
+    forge; the caller IS the actor. Returns the authorisation row."""
+    status, text = http("POST", f"{base}/orgs/{org}/skills/{install_id}/authorise",
+                        {}, token=member_token)
+    if status != 201:
+        raise Operational(f"authorising skill install {install_id} failed: {status} {text[:200]}")
+    return json.loads(text)
+
+
+def skill_index(base: str, token: str, org: str) -> list:
+    """The caller's authorised index (S6), precedence-ordered by the store."""
+    status, text = http("GET", f"{base}/orgs/{org}/skills", token=token)
+    if status != 200:
+        raise Operational(f"reading the skill index failed: {status} {text[:200]}")
+    rows = json.loads(text)
+    return rows if isinstance(rows, list) else []
+
+
+def revoke_skill_authorisation(base: str, token: str, org: str, auth_id: str) -> int:
+    """The caller's own retreat (tombstone)."""
+    status, _ = http("DELETE", f"{base}/orgs/{org}/skills/authorisations/{auth_id}", token=token)
+    return status
+
+
 def reapprove_install(base: str, admin_token: str, org: str, install_id: str) -> dict:
     """The org's fresh consent: fetch what the endpoint serves NOW and pin it."""
     status, text = http("POST", f"{base}/orgs/{org}/installs/{install_id}/reapprove",

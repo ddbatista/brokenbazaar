@@ -140,3 +140,29 @@ func (a *AgentAudit) Post(id, outcome, summary string, durationMs int64) error {
 		"duration_ms": durationMs,
 	})
 }
+
+// SkillLoad records one skill load (M4b, SR-B9-6's event half): the
+// skill that fired, the trigger that matched, the install's pinned
+// digest, the sha of the bytes actually loaded, and -- stated, never
+// implied -- whether the two agreed at load time. A record with
+// verified=false is the naive build's advisory pin saying its own
+// quiet part out loud; the hardened build's loads are T5's mediation
+// and will write their own records with verified=true or none at all.
+// 09's second beat asserts this record's ABSENCE: the description
+// channel delivered without a single load.
+func (a *AgentAudit) SkillLoad(load SkillLoad, call CallContext) error {
+	return a.write(map[string]any{
+		"ts":         auditStamp(),
+		"phase":      "skill_load",
+		"session":    call.Session.ID,
+		"acting_for": call.Session.ActingFor,
+		"org":        call.Session.OrgID,
+		"skill":      load.SkillName,
+		"install_id": load.InstallID,
+		"trigger":    load.Trigger,
+		"pinned_sha": load.Digest,
+		"loaded_sha": load.BodySHA,
+		"verified":   load.Verified,
+		"mediated":   false,
+	})
+}

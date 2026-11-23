@@ -162,6 +162,23 @@ type Loop struct {
 	// is the concatenated system prompt instead (m4a D5's two halves).
 	Catalog []Span
 
+	// Skills is the skill index channel (M4b T4): the acting user's
+	// authorised skills, one span each. The hardened build wraps them
+	// origin `publisher`; the vulnerable build leaves this nil and
+	// concatenates the same lines into the system prompt instead --
+	// the same two-halves split as the catalog, with the description
+	// channel as 09's second variant's site.
+	Skills []Span
+
+	// LoadedSkills is the load path's span set (M4b): the bodies of
+	// every skill whose trigger matched the run's message, inserted
+	// after the index and before the transcript. The naive build
+	// loads every match, unverified, wearing the system origin --
+	// instruction by entry; the hardened build's loader is T5's
+	// mediation (re-hash, disclosure, events) and fills this with
+	// verified bodies or nothing.
+	LoadedSkills []Span
+
 	// Audit is D4's second writer, constructed only in vulnerable builds
 	// (NewAgentAudit is build-tagged: nil in hardened, where the
 	// gateway's JSONL is the entire audit trail). Nil means every audit
@@ -200,12 +217,20 @@ func (l *Loop) Run(ctx context.Context) (Outcome, error) {
 	// as such -- then the session. In hardened mode this is the ONLY way
 	// publisher bytes enter the context; the assembler itself never
 	// touches them (SR-B6-2: wrapped and marked, never concatenated).
-	if len(l.Catalog) > 0 && len(spans) > 0 {
-		withCatalog := make([]Span, 0, len(spans)+len(l.Catalog))
-		withCatalog = append(withCatalog, spans[0])
-		withCatalog = append(withCatalog, l.Catalog...)
-		withCatalog = append(withCatalog, spans[1:]...)
-		spans = withCatalog
+	// M4b extends the same order one channel at a time: the catalog's
+	// tools, then the skill index (the acting user's own, marked the
+	// same way), then the bodies the run's message loaded -- so a
+	// transcript's span order reads as the trust order it was built in.
+	mid := make([]Span, 0, len(l.Catalog)+len(l.Skills)+len(l.LoadedSkills))
+	mid = append(mid, l.Catalog...)
+	mid = append(mid, l.Skills...)
+	mid = append(mid, l.LoadedSkills...)
+	if len(mid) > 0 && len(spans) > 0 {
+		withContext := make([]Span, 0, len(spans)+len(mid))
+		withContext = append(withContext, spans[0])
+		withContext = append(withContext, mid...)
+		withContext = append(withContext, spans[1:]...)
+		spans = withContext
 	}
 
 	maxTurns := l.MaxTurns
